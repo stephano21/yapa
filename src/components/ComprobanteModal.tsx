@@ -251,11 +251,18 @@ function createStyles(colors: ColorPalette) {
       maxHeight: 420,
     },
     bodyContent: {
-      padding: 20,
+      padding: 12,
       paddingBottom: 16,
     },
     captureArea: {
-      padding: 0,
+      backgroundColor: colors.superficie,
+      padding: 20,
+      paddingBottom: 16,
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: colors.borde,
+      minWidth: 280,
+      overflow: 'hidden',
     },
     logo: {
       width: 120,

@@ -15,7 +15,14 @@ import {
   ScrollView,
 } from 'react-native';
 import { ShoppingCart, Zap, X, Plus, Minus, Sun, Moon } from 'lucide-react-native';
-import { getProductos, registrarVentaConDetalle, type Producto } from '../database/db';
+import {
+  getProductos,
+  registrarVentaConDetalle,
+  getClientes,
+  crearCliente,
+  type Producto,
+  type Cliente,
+} from '../database/db';
 import { useYapaStore } from '../store/useYapaStore';
 import type { MetodoPago } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
@@ -40,6 +47,11 @@ export default function HomeScreen() {
   const [showVentaExpress, setShowVentaExpress] = useState(false);
   const [comprobanteActual, setComprobanteActual] = useState<ComprobanteVenta | null>(null);
   const [showComprobante, setShowComprobante] = useState(false);
+  const [esFiado, setEsFiado] = useState(false);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
+  const [nuevoClienteNombre, setNuevoClienteNombre] = useState('');
+  const [mostrarAgregarCliente, setMostrarAgregarCliente] = useState(false);
 
   const {
     cajaAbierta,
@@ -75,21 +87,49 @@ export default function HomeScreen() {
     cargarProductos();
   }, [cargarProductos]);
 
+  useEffect(() => {
+    if (carritoVisible) cargarClientes();
+  }, [carritoVisible, cargarClientes]);
+
+  const cargarClientes = useCallback(async () => {
+    const list = await getClientes();
+    setClientes(list);
+  }, []);
+
   const handleFinalizarVenta = async () => {
     if (items.length === 0 || !metodoPagoSeleccionado) return;
+    if (esFiado && !clienteSeleccionado) return;
     const detalle = items.map((it) => ({
       nombre: it.nombre,
       cantidad: it.cantidad,
       precio: it.precio,
     }));
+    const opciones =
+      esFiado && clienteSeleccionado
+        ? { esFiado: true, clienteId: clienteSeleccionado.id }
+        : undefined;
     const comprobante = await registrarVentaConDetalle(
       total,
       metodoPagoSeleccionado,
-      detalle
+      detalle,
+      opciones
     );
     clearCart();
+    setEsFiado(false);
+    setClienteSeleccionado(null);
     setComprobanteActual(comprobante);
     setShowComprobante(true);
+  };
+
+  const agregarClienteYSeleccionar = async () => {
+    const nombre = nuevoClienteNombre.trim();
+    if (!nombre) return;
+    const id = await crearCliente(nombre);
+    const nuevo: Cliente = { id, nombre };
+    setClientes((prev) => [...prev, nuevo].sort((a, b) => a.nombre.localeCompare(b.nombre)));
+    setClienteSeleccionado(nuevo);
+    setNuevoClienteNombre('');
+    setMostrarAgregarCliente(false);
   };
 
   const handleVentaExpress = () => {
@@ -324,17 +364,85 @@ export default function HomeScreen() {
                 ))}
               </View>
 
+              <Text style={styles.metodoLabel}>¿Cobrar ahora o dejar fiado?</Text>
+              <View style={styles.filaCobrarFiado}>
+                <TouchableOpacity
+                  style={[styles.btnCobrarFiado, !esFiado && styles.btnCobrarFiadoActivo]}
+                  onPress={() => { setEsFiado(false); setClienteSeleccionado(null); }}
+                >
+                  <Text style={[styles.btnCobrarFiadoTexto, !esFiado && styles.btnCobrarFiadoTextoActivo]}>
+                    Cobrar ahora
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.btnCobrarFiado, esFiado && styles.btnCobrarFiadoActivo]}
+                  onPress={() => setEsFiado(true)}
+                >
+                  <Text style={[styles.btnCobrarFiadoTexto, esFiado && styles.btnCobrarFiadoTextoActivo]}>
+                    Dejar fiado
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {esFiado && (
+                <View style={styles.clienteSection}>
+                  <Text style={styles.metodoLabel}>Cliente</Text>
+                  {!mostrarAgregarCliente ? (
+                    <>
+                      <ScrollView style={styles.clientesList} nestedScrollEnabled>
+                        {clientes.map((c) => (
+                          <TouchableOpacity
+                            key={c.id}
+                            style={[
+                              styles.clienteChip,
+                              clienteSeleccionado?.id === c.id && styles.clienteChipActivo,
+                            ]}
+                            onPress={() => setClienteSeleccionado(c)}
+                          >
+                            <Text style={[styles.clienteChipTexto, clienteSeleccionado?.id === c.id && styles.clienteChipTextoActivo]} numberOfLines={1}>
+                              {c.nombre}
+                            </Text>
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
+                      <TouchableOpacity style={styles.btnAgregarCliente} onPress={() => setMostrarAgregarCliente(true)}>
+                        <Text style={styles.btnAgregarClienteTexto}>+ Agregar cliente</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : (
+                    <View style={styles.agregarClienteRow}>
+                      <TextInput
+                        style={styles.agregarClienteInput}
+                        placeholder="Nombre del cliente"
+                        placeholderTextColor={colors.textoSuave}
+                        value={nuevoClienteNombre}
+                        onChangeText={setNuevoClienteNombre}
+                        autoFocus
+                      />
+                      <TouchableOpacity style={styles.btnGuardarCliente} onPress={agregarClienteYSeleccionar}>
+                        <Text style={styles.btnGuardarClienteTexto}>Guardar</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity onPress={() => { setMostrarAgregarCliente(false); setNuevoClienteNombre(''); }}>
+                        <X size={22} color={colors.textoSuave} />
+                      </TouchableOpacity>
+                    </View>
+                  )}
+                </View>
+              )}
+
               <TouchableOpacity
                 style={[
                   styles.btnFinalizar,
-                  (items.length === 0 || !metodoPagoSeleccionado) &&
+                  (items.length === 0 || !metodoPagoSeleccionado || (esFiado && !clienteSeleccionado)) &&
                     styles.btnFinalizarDisabled,
                 ]}
                 onPress={handleFinalizarVenta}
-                disabled={items.length === 0 || !metodoPagoSeleccionado}
+                disabled={items.length === 0 || !metodoPagoSeleccionado || (esFiado && !clienteSeleccionado)}
                 activeOpacity={0.85}
               >
-                <Text style={styles.btnFinalizarTexto}>Finalizar venta</Text>
+                <Text style={styles.btnFinalizarTexto}>
+                  {esFiado ? 'Dejar fiado' : 'Finalizar venta'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -706,6 +814,96 @@ function createStyles(colors: ColorPalette) {
   },
   metodoTextoActivo: {
     color: colors.verde,
+  },
+  filaCobrarFiado: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  btnCobrarFiado: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: colors.fondo,
+    borderWidth: 2,
+    borderColor: colors.borde,
+  },
+  btnCobrarFiadoActivo: {
+    borderColor: colors.verde,
+    backgroundColor: 'rgba(168, 198, 159, 0.2)',
+  },
+  btnCobrarFiadoTexto: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.textoSuave,
+  },
+  btnCobrarFiadoTextoActivo: {
+    color: colors.verde,
+  },
+  clienteSection: {
+    marginBottom: 12,
+  },
+  clientesList: {
+    maxHeight: 100,
+    marginBottom: 8,
+  },
+  clienteChip: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: colors.fondo,
+    borderWidth: 1,
+    borderColor: colors.borde,
+    marginBottom: 6,
+  },
+  clienteChipActivo: {
+    borderColor: colors.verde,
+    backgroundColor: 'rgba(168, 198, 159, 0.2)',
+  },
+  clienteChipTexto: {
+    fontSize: 14,
+    color: colors.texto,
+  },
+  clienteChipTextoActivo: {
+    color: colors.verde,
+    fontWeight: '600',
+  },
+  btnAgregarCliente: {
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  btnAgregarClienteTexto: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.verde,
+  },
+  agregarClienteRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  agregarClienteInput: {
+    flex: 1,
+    backgroundColor: colors.fondo,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 14,
+    color: colors.texto,
+    borderWidth: 1,
+    borderColor: colors.borde,
+  },
+  btnGuardarCliente: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    backgroundColor: colors.verde,
+  },
+  btnGuardarClienteTexto: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.onPrimario,
   },
   btnFinalizar: {
     backgroundColor: colors.naranja,
