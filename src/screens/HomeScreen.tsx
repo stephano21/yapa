@@ -103,6 +103,7 @@ export default function HomeScreen() {
       nombre: it.nombre,
       cantidad: it.cantidad,
       precio: it.precio,
+      ...(it.id > 0 && { producto_id: it.id }),
     }));
     const opciones =
       esFiado && clienteSeleccionado
@@ -119,6 +120,7 @@ export default function HomeScreen() {
     setClienteSeleccionado(null);
     setComprobanteActual(comprobante);
     setShowComprobante(true);
+    await cargarProductos();
   };
 
   const agregarClienteYSeleccionar = async () => {

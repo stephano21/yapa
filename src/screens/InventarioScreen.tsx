@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -48,9 +49,11 @@ export default function InventarioScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    cargar();
-  }, [cargar]);
+  useFocusEffect(
+    useCallback(() => {
+      cargar();
+    }, [cargar])
+  );
 
   const abrirCrear = () => {
     setMode('crear');

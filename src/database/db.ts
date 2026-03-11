@@ -104,24 +104,6 @@ async function initDb(): Promise<SQLiteDatabase> {
     await db.execAsync('ALTER TABLE clientes ADD COLUMN saldo_a_favor REAL DEFAULT 0');
   } catch (_) {}
 
-  const row = await db.getFirstAsync<{ count: number }>(
-    'SELECT COUNT(*) as count FROM productos'
-  );
-  if (row && row.count === 0) {
-    await db.runAsync(
-      'INSERT INTO productos (nombre, precio_venta, precio_costo, stock) VALUES (?, ?, ?, ?)',
-      ['Café', 2.5, 1.2, 50]
-    );
-    await db.runAsync(
-      'INSERT INTO productos (nombre, precio_venta, precio_costo, stock) VALUES (?, ?, ?, ?)',
-      ['Pan', 1.2, 0.5, 30]
-    );
-    await db.runAsync(
-      'INSERT INTO productos (nombre, precio_venta, precio_costo, stock) VALUES (?, ?, ?, ?)',
-      ['Agua', 1.0, 0.3, 100]
-    );
-  }
-
   return db;
 }
 
@@ -189,9 +171,11 @@ export type ItemVentaInput = {
   nombre: string;
   cantidad: number;
   precio: number;
+  /** Id del producto para descontar stock; omitir en ventas rápidas (monto manual). */
+  producto_id?: number;
 };
 
-/** Registra una venta con su detalle (para comprobante). Si es fiado, pasar clienteId. */
+/** Registra una venta con su detalle (para comprobante). Si es fiado, pasar clienteId. Descuenta stock de productos. */
 export async function registrarVentaConDetalle(
   total: number,
   metodo_pago: MetodoPago,
@@ -216,6 +200,12 @@ export async function registrarVentaConDetalle(
        VALUES (?, ?, ?, ?, ?)`,
       [ventaId, it.nombre, it.cantidad, it.precio, subtotal]
     );
+    if (it.producto_id != null && it.producto_id > 0) {
+      await db.runAsync(
+        'UPDATE productos SET stock = MAX(0, COALESCE(stock, 0) - ?) WHERE id = ?',
+        [it.cantidad, it.producto_id]
+      );
+    }
   }
 
   const detalleItems: VentaDetalleItem[] = items.map((it) => ({
