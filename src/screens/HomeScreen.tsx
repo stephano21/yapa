@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -86,6 +87,12 @@ export default function HomeScreen() {
   useEffect(() => {
     cargarProductos();
   }, [cargarProductos]);
+
+  useFocusEffect(
+    useCallback(() => {
+      cargarProductos();
+    }, [cargarProductos])
+  );
 
   useEffect(() => {
     if (carritoVisible) cargarClientes();
