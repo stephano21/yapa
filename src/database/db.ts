@@ -5,7 +5,7 @@ const DB_NAME = 'yapa_pos.db';
 
 let dbInstance: SQLiteDatabase | null = null;
 
-export type MetodoPago = 'Efectivo' | 'Transferencia' | 'Tarjeta';
+export type MetodoPago = 'Efectivo' | 'Transferencia';
 
 export interface Producto {
   id: number;
@@ -13,6 +13,25 @@ export interface Producto {
   precio_venta: number;
   precio_costo: number;
   stock: number;
+  /** Precio mínimo opcional para este producto (por unidad). Si es null/undefined, se usa la regla global. */
+  precio_minimo?: number | null;
+}
+
+/** Margen mínimo global sobre el costo (10% por defecto). */
+export const MARGEN_MINIMO_GLOBAL = 0.1;
+
+/** Calcula el precio mínimo permitido para un producto respetando margen mínimo. */
+export function calcularPrecioMinimo(producto: Producto): number {
+  if (producto.precio_minimo != null) {
+    return producto.precio_minimo;
+  }
+  const base = producto.precio_costo;
+  const minimo = base * (1 + MARGEN_MINIMO_GLOBAL);
+  // Si por algún motivo el costo fuera 0, caemos al precio_venta actual.
+  if (!Number.isFinite(minimo) || minimo <= 0) {
+    return producto.precio_venta;
+  }
+  return minimo;
 }
 
 export type EstadoVenta = 'cobrado' | 'fiado';
@@ -57,14 +76,24 @@ async function initDb(): Promise<SQLiteDatabase> {
       nombre TEXT NOT NULL,
       precio_venta REAL NOT NULL,
       precio_costo REAL NOT NULL DEFAULT 0,
-      stock INTEGER NOT NULL DEFAULT 0
+      precio_minimo REAL,
+      stock INTEGER NOT NULL DEFAULT 0,
+      remote_id TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      dirty INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS ventas (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       fecha TEXT NOT NULL,
       total REAL NOT NULL,
-      metodo_pago TEXT NOT NULL
+      metodo_pago TEXT NOT NULL,
+      estado TEXT DEFAULT 'cobrado',
+      cliente_id INTEGER,
+      remote_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at TEXT,
+      dirty INTEGER NOT NULL DEFAULT 1
     );
 
     CREATE TABLE IF NOT EXISTS venta_detalle (
@@ -74,12 +103,20 @@ async function initDb(): Promise<SQLiteDatabase> {
       cantidad REAL NOT NULL,
       precio_unitario REAL NOT NULL,
       subtotal REAL NOT NULL,
+      remote_id TEXT,
+      synced_at TEXT,
+      dirty INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (venta_id) REFERENCES ventas(id)
     );
 
     CREATE TABLE IF NOT EXISTS clientes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      nombre TEXT NOT NULL
+      nombre TEXT NOT NULL,
+      deuda_inicial REAL DEFAULT 0,
+      saldo_a_favor REAL DEFAULT 0,
+      remote_id TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      dirty INTEGER NOT NULL DEFAULT 0
     );
 
     CREATE TABLE IF NOT EXISTS cobros (
@@ -87,6 +124,10 @@ async function initDb(): Promise<SQLiteDatabase> {
       cliente_id INTEGER NOT NULL,
       monto REAL NOT NULL,
       fecha TEXT NOT NULL,
+      remote_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      synced_at TEXT,
+      dirty INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (cliente_id) REFERENCES clientes(id)
     );
   `);
@@ -103,6 +144,94 @@ async function initDb(): Promise<SQLiteDatabase> {
   try {
     await db.execAsync('ALTER TABLE clientes ADD COLUMN saldo_a_favor REAL DEFAULT 0');
   } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE productos ADD COLUMN precio_minimo REAL');
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE productos ADD COLUMN remote_id TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      "ALTER TABLE productos ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      'ALTER TABLE productos ADD COLUMN dirty INTEGER NOT NULL DEFAULT 0'
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE ventas ADD COLUMN remote_id TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      "ALTER TABLE ventas ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))"
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE ventas ADD COLUMN synced_at TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      'ALTER TABLE ventas ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1'
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE venta_detalle ADD COLUMN remote_id TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE venta_detalle ADD COLUMN synced_at TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      'ALTER TABLE venta_detalle ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1'
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE clientes ADD COLUMN remote_id TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      "ALTER TABLE clientes ADD COLUMN updated_at TEXT NOT NULL DEFAULT (datetime('now'))"
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      'ALTER TABLE clientes ADD COLUMN dirty INTEGER NOT NULL DEFAULT 0'
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE cobros ADD COLUMN remote_id TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      "ALTER TABLE cobros ADD COLUMN created_at TEXT NOT NULL DEFAULT (datetime('now'))"
+    );
+  } catch (_) {}
+  try {
+    await db.execAsync('ALTER TABLE cobros ADD COLUMN synced_at TEXT');
+  } catch (_) {}
+  try {
+    await db.execAsync(
+      'ALTER TABLE cobros ADD COLUMN dirty INTEGER NOT NULL DEFAULT 1'
+    );
+  } catch (_) {}
+
+  // Marcar como pendientes de sync los que no tienen remote_id (cuando exista la columna).
+  // Si algo falla, marcamos todos los registros como pendientes para que se vean en la pantalla de sincronización.
+  const marcarPendientes = async (tabla: string) => {
+    try {
+      await db.execAsync(`UPDATE ${tabla} SET dirty = 1 WHERE remote_id IS NULL`);
+    } catch (_) {
+      try {
+        await db.execAsync(`UPDATE ${tabla} SET dirty = 1`);
+      } catch (_) {}
+    }
+  };
+  await marcarPendientes('productos');
+  await marcarPendientes('clientes');
+  await marcarPendientes('ventas');
+  await marcarPendientes('cobros');
 
   return db;
 }
@@ -117,12 +246,12 @@ export async function getProductos(busqueda?: string): Promise<Producto[]> {
   const db = await getDatabase();
   if (busqueda?.trim()) {
     return db.getAllAsync<Producto>(
-      'SELECT id, nombre, precio_venta, precio_costo, stock FROM productos WHERE nombre LIKE ? ORDER BY nombre',
+      'SELECT id, nombre, precio_venta, precio_costo, precio_minimo, stock FROM productos WHERE nombre LIKE ? ORDER BY nombre',
       [`%${busqueda.trim()}%`]
     );
   }
   return db.getAllAsync<Producto>(
-    'SELECT id, nombre, precio_venta, precio_costo, stock FROM productos ORDER BY nombre'
+    'SELECT id, nombre, precio_venta, precio_costo, precio_minimo, stock FROM productos ORDER BY nombre'
   );
 }
 
@@ -142,7 +271,8 @@ export async function crearProducto(
 ): Promise<number> {
   const db = await getDatabase();
   const result = await db.runAsync(
-    'INSERT INTO productos (nombre, precio_venta, precio_costo, stock) VALUES (?, ?, ?, ?)',
+    `INSERT INTO productos (nombre, precio_venta, precio_costo, stock, dirty, updated_at)
+     VALUES (?, ?, ?, ?, 1, datetime('now'))`,
     [nombre, precio_venta, precio_costo, stock]
   );
   return result.lastInsertRowId;
@@ -157,7 +287,8 @@ export async function actualizarProducto(
 ): Promise<void> {
   const db = await getDatabase();
   await db.runAsync(
-    'UPDATE productos SET nombre = ?, precio_venta = ?, precio_costo = ?, stock = ? WHERE id = ?',
+    `UPDATE productos SET nombre = ?, precio_venta = ?, precio_costo = ?, stock = ?,
+      dirty = 1, updated_at = datetime('now') WHERE id = ?`,
     [nombre, precio_venta, precio_costo, stock, id]
   );
 }
@@ -400,7 +531,10 @@ export async function getClientes(busqueda?: string): Promise<Cliente[]> {
 
 export async function crearCliente(nombre: string): Promise<number> {
   const db = await getDatabase();
-  const result = await db.runAsync('INSERT INTO clientes (nombre) VALUES (?)', [nombre.trim()]);
+  const result = await db.runAsync(
+    `INSERT INTO clientes (nombre, dirty, updated_at) VALUES (?, 1, datetime('now'))`,
+    [nombre.trim()]
+  );
   return result.lastInsertRowId;
 }
 
@@ -493,7 +627,7 @@ export async function registrarCobro(clienteId: number, monto: number): Promise<
   const db = await getDatabase();
   const fecha = new Date().toISOString();
   const result = await db.runAsync(
-    'INSERT INTO cobros (cliente_id, monto, fecha) VALUES (?, ?, ?)',
+    `INSERT INTO cobros (cliente_id, monto, fecha, dirty, created_at) VALUES (?, ?, ?, 1, datetime('now'))`,
     [clienteId, monto, fecha]
   );
   return result.lastInsertRowId;

@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { ShoppingCart, Zap, X, Plus, Minus, Sun, Moon } from 'lucide-react-native';
 import {
@@ -21,6 +22,7 @@ import {
   registrarVentaConDetalle,
   getClientes,
   crearCliente,
+  calcularPrecioMinimo,
   type Producto,
   type Cliente,
 } from '../database/db';
@@ -34,7 +36,6 @@ import type { ComprobanteVenta } from '../database/db';
 const METODOS: { metodo: MetodoPago; emoji: string; label: string }[] = [
   { metodo: 'Efectivo', emoji: '💵', label: 'Efectivo' },
   { metodo: 'Transferencia', emoji: '📱', label: 'Transferencia' },
-  { metodo: 'Tarjeta', emoji: '💳', label: 'Tarjeta' },
 ];
 
 export default function HomeScreen() {
@@ -53,6 +54,8 @@ export default function HomeScreen() {
   const [clienteSeleccionado, setClienteSeleccionado] = useState<Cliente | null>(null);
   const [nuevoClienteNombre, setNuevoClienteNombre] = useState('');
   const [mostrarAgregarCliente, setMostrarAgregarCliente] = useState(false);
+  const [itemEditandoPrecio, setItemEditandoPrecio] = useState<CartItem | null>(null);
+  const [precioPersonalizado, setPrecioPersonalizado] = useState('');
 
   const {
     cajaAbierta,
@@ -62,6 +65,7 @@ export default function HomeScreen() {
     addProducto,
     removeProducto,
     updateCantidad,
+    updatePrecio,
     getTotal,
     addVentaExpress,
     setMetodoPago,
@@ -308,12 +312,20 @@ export default function HomeScreen() {
                 items.map((item) => (
                   <View key={item.id} style={styles.carritoItem}>
                     <View style={styles.carritoItemInfo}>
-                      <Text style={styles.carritoItemNombre} numberOfLines={1}>
-                        {item.nombre}
-                      </Text>
-                      <Text style={styles.carritoItemPrecio}>
-                        ${(item.precio * item.cantidad).toFixed(2)}
-                      </Text>
+                      <TouchableOpacity
+                        onPress={() => {
+                          setItemEditandoPrecio(item);
+                          setPrecioPersonalizado(String(item.precio));
+                        }}
+                      >
+                        <Text style={styles.carritoItemNombre} numberOfLines={1}>
+                          {item.nombre}
+                        </Text>
+                        <Text style={styles.carritoItemPrecio}>
+                          ${item.precio.toFixed(2)} x {item.cantidad} = $
+                          {(item.precio * item.cantidad).toFixed(2)}
+                        </Text>
+                      </TouchableOpacity>
                     </View>
                     <View style={styles.carritoItemCantidad}>
                       <TouchableOpacity
@@ -456,6 +468,73 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* Modal para editar precio de un ítem */}
+      <Modal
+        visible={!!itemEditandoPrecio}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setItemEditandoPrecio(null)}
+      >
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setItemEditandoPrecio(null)}
+        >
+          <Pressable
+            style={styles.modalVentaExpress}
+            onPress={(e) => e.stopPropagation()}
+          >
+            <Text style={styles.modalTitulo}>Editar precio</Text>
+            {itemEditandoPrecio && (
+              <>
+                <Text style={styles.modalSubtitulo}>
+                  {itemEditandoPrecio.nombre}
+                </Text>
+                <TextInput
+                  style={styles.inputMonto}
+                  placeholder="Nuevo precio unitario"
+                  placeholderTextColor={colors.textoSuave}
+                  value={precioPersonalizado}
+                  onChangeText={setPrecioPersonalizado}
+                  keyboardType="decimal-pad"
+                />
+                <TouchableOpacity
+                  style={styles.modalBtnConfirmar}
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    if (!itemEditandoPrecio) return;
+                    const valor = parseFloat(
+                      precioPersonalizado.replace(',', '.')
+                    );
+                    if (!Number.isFinite(valor) || valor <= 0) {
+                      return;
+                    }
+                    const producto = productos.find(
+                      (p) => p.id === itemEditandoPrecio.id
+                    );
+                    if (producto) {
+                      const minimo = calcularPrecioMinimo(producto);
+                      if (valor < minimo) {
+                        Alert.alert(
+                          'Precio demasiado bajo',
+                          `El precio mínimo para este producto es $${minimo.toFixed(
+                            2
+                          )} para mantener una ganancia mínima.`
+                        );
+                        return;
+                      }
+                    }
+                    updatePrecio(itemEditandoPrecio.id, valor);
+                    setItemEditandoPrecio(null);
+                  }}
+                >
+                  <Text style={styles.modalBtnTexto}>Guardar precio</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </Pressable>
+        </Pressable>
       </Modal>
 
       <ComprobanteModal

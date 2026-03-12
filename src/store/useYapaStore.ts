@@ -21,6 +21,7 @@ interface YapaState {
   addProducto: (id: number, nombre: string, precio: number) => void;
   removeProducto: (id: number) => void;
   updateCantidad: (id: number, delta: number) => void;
+  updatePrecio: (id: number, precio: number) => void;
   clearCart: () => void;
   getTotal: () => number;
 
@@ -35,7 +36,7 @@ interface YapaState {
 export const useYapaStore = create<YapaState>((set, get) => ({
   cajaAbierta: true,
   items: [],
-  metodoPagoSeleccionado: null,
+  metodoPagoSeleccionado: 'Efectivo',
   carritoVisible: false,
 
   abrirCaja: () => set({ cajaAbierta: true }),
@@ -80,8 +81,17 @@ export const useYapaStore = create<YapaState>((set, get) => ({
     });
   },
 
+  updatePrecio: (id, precio) => {
+    if (precio <= 0 || !Number.isFinite(precio)) return;
+    set((state) => ({
+      items: state.items.map((i) =>
+        i.id === id ? { ...i, precio } : i
+      ),
+    }));
+  },
+
   clearCart: () =>
-    set({ items: [], metodoPagoSeleccionado: null, carritoVisible: false }),
+    set({ items: [], metodoPagoSeleccionado: 'Efectivo', carritoVisible: false }),
 
   getTotal: () => {
     return get().items.reduce(

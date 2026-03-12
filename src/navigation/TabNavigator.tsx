@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import HomeScreen from '../screens/HomeScreen';
 import InventarioScreen from '../screens/InventarioScreen';
 import BalanceScreen from '../screens/BalanceScreen';
+import SyncScreen from '../screens/SyncScreen';
 import { useTheme } from '../context/ThemeContext';
 
 const Tab = createBottomTabNavigator();
@@ -12,6 +13,7 @@ const ICONS: Record<string, { focused: keyof typeof Ionicons.glyphMap; unfocused
   Ventas: { focused: 'cart', unfocused: 'cart-outline' },
   Inventario: { focused: 'cube', unfocused: 'cube-outline' },
   Balance: { focused: 'wallet', unfocused: 'wallet-outline' },
+  Sincronización: { focused: 'cloud-upload', unfocused: 'cloud-upload-outline' },
 };
 
 export default function TabNavigator() {
@@ -45,6 +47,7 @@ export default function TabNavigator() {
       <Tab.Screen name="Ventas" component={HomeScreen} />
       <Tab.Screen name="Inventario" component={InventarioScreen} />
       <Tab.Screen name="Balance" component={BalanceScreen} />
+      <Tab.Screen name="Sincronización" component={SyncScreen} />
     </Tab.Navigator>
   );
 }
