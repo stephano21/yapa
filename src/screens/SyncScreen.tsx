@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Cloud, Package, Users, ShoppingCart, Banknote, Info } from 'lucide-react-native';
 import {
@@ -73,12 +74,14 @@ export default function SyncScreen() {
 
   if (cargando) {
     return (
-      <View style={styles.contenedor}>
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.contenedor}>
         <View style={styles.header}>
           <Text style={styles.titulo}>Sincronización</Text>
         </View>
         <ActivityIndicator size="large" color={colors.verde} style={styles.loader} />
-      </View>
+        </View>
+      </SafeAreaView>
     );
   }
 
@@ -88,16 +91,19 @@ export default function SyncScreen() {
       : 0;
 
   return (
-    <ScrollView
-      style={styles.contenedor}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
-    >
+    <SafeAreaView style={styles.safeArea}>
+      <ScrollView
+        style={styles.contenedor}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
       <View style={styles.header}>
-        <View style={styles.headerIcon}>
-          <Cloud size={28} color={colors.verde} />
+        <View style={styles.headerTituloRow}>
+          <View style={styles.headerIcon}>
+            <Cloud size={28} color={colors.verde} />
+          </View>
+          <Text style={styles.titulo}>Sincronización</Text>
         </View>
-        <Text style={styles.titulo}>Sincronización</Text>
         <Text style={styles.subtitulo}>
           Datos listos para enviar al servidor cuando conectes un API. Por ahora todo se guarda
           solo en este dispositivo.
@@ -213,12 +219,17 @@ export default function SyncScreen() {
           para sincronizar con el servidor.
         </Text>
       )}
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 function createStyles(colors: ColorPalette) {
   return StyleSheet.create({
+    safeArea: {
+      flex: 1,
+      backgroundColor: colors.fondo,
+    },
     contenedor: {
       flex: 1,
       backgroundColor: colors.fondo,
@@ -230,8 +241,13 @@ function createStyles(colors: ColorPalette) {
     header: {
       marginBottom: 24,
     },
+    headerTituloRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
     headerIcon: {
-      marginBottom: 8,
+      marginRight: 4,
     },
     titulo: {
       fontSize: 24,

@@ -47,7 +47,8 @@ export default function TabNavigator() {
       <Tab.Screen name="Ventas" component={HomeScreen} />
       <Tab.Screen name="Inventario" component={InventarioScreen} />
       <Tab.Screen name="Balance" component={BalanceScreen} />
-      <Tab.Screen name="Sincronización" component={SyncScreen} />
+      {/* TODO: Add sync screen */}
+      {/* <Tab.Screen name="Sincronización" component={SyncScreen} /> */}
     </Tab.Navigator>
   );
 }
