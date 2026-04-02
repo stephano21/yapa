@@ -5,7 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { getDatabase } from './src/database/db';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
-import TabNavigator from './src/navigation/TabNavigator';
+import RootNavigator from './src/navigation/RootNavigator';
 
 function AppContent() {
   const [listo, setListo] = useState(false);
@@ -31,7 +31,7 @@ function AppContent() {
 
   return (
     <>
-      <TabNavigator />
+      <RootNavigator />
       <StatusBar style={isDark ? 'light' : 'dark'} />
     </>
   );

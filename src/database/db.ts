@@ -50,6 +50,13 @@ export interface Cliente {
   nombre: string;
 }
 
+export interface UnidadMedida {
+  id: number;
+  nombre: string;
+  /** Factor de conversión a unidades base. Ej: "Docena" -> 12 unidades base. */
+  unidades: number;
+}
+
 /** Línea del comprobante (detalle de venta) */
 export interface VentaDetalleItem {
   descripcion: string;
@@ -129,6 +136,14 @@ async function initDb(): Promise<SQLiteDatabase> {
       synced_at TEXT,
       dirty INTEGER NOT NULL DEFAULT 1,
       FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS unidades_medida (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nombre TEXT NOT NULL,
+      unidades INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      dirty INTEGER NOT NULL DEFAULT 0
     );
   `);
 
@@ -233,6 +248,30 @@ async function initDb(): Promise<SQLiteDatabase> {
   await marcarPendientes('ventas');
   await marcarPendientes('cobros');
 
+  // Seeds iniciales para que el catálogo exista desde el inicio.
+  // - Unidad = 1
+  // - Docena = 12
+  try {
+    const row = await db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) as count FROM unidades_medida'
+    );
+    const count = row?.count ?? 0;
+    if (count === 0) {
+      await db.runAsync(
+        `INSERT INTO unidades_medida (nombre, unidades, dirty, updated_at)
+         VALUES (?, ?, 0, datetime('now'))`,
+        ['Unidad', 1]
+      );
+      await db.runAsync(
+        `INSERT INTO unidades_medida (nombre, unidades, dirty, updated_at)
+         VALUES (?, ?, 0, datetime('now'))`,
+        ['Docena', 12]
+      );
+    }
+  } catch (_) {
+    // Si falla el seed, igual la app puede funcionar sin catálogo.
+  }
+
   return db;
 }
 
@@ -261,6 +300,29 @@ export async function getProductoById(id: number): Promise<Producto | null> {
     'SELECT id, nombre, precio_venta, precio_costo, stock FROM productos WHERE id = ?',
     [id]
   );
+}
+
+export async function getUnidadesMedida(): Promise<UnidadMedida[]> {
+  const db = await getDatabase();
+  return db.getAllAsync<UnidadMedida>(
+    'SELECT id, nombre, unidades FROM unidades_medida ORDER BY unidades ASC, nombre ASC'
+  );
+}
+
+export async function crearUnidadMedida(nombre: string, unidades: number): Promise<number> {
+  const db = await getDatabase();
+  const n = nombre.trim();
+  const u = Math.floor(unidades);
+  if (!n) return Promise.reject(new Error('Nombre requerido'));
+  if (!Number.isFinite(u) || u <= 0) {
+    return Promise.reject(new Error('Unidades inválidas'));
+  }
+  const result = await db.runAsync(
+    `INSERT INTO unidades_medida (nombre, unidades, dirty, updated_at)
+     VALUES (?, ?, 0, datetime('now'))`,
+    [n, u]
+  );
+  return result.lastInsertRowId;
 }
 
 export async function crearProducto(
