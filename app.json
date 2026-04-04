@@ -27,6 +27,10 @@
     "web": {
       "favicon": "./assets/favicon.png"
     },
+    "plugins": [
+      "./plugins/withLocalProperties.js",
+      "./plugins/withAndroidReleaseSigning.js"
+    ],
     "extra": {
       "eas": {
         "projectId": "d20fc013-b456-4b37-97ac-eea8b1096140"

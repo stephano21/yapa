@@ -1,0 +1,13 @@
+# Estrategia actual: variables de entorno + plugins (withLocalProperties + withAndroidReleaseSigning).
+# En cada prebuild se puede regenerar android/local.properties con:
+#   ANDROID_HOME, ANDROID_KEYSTORE_PATH, ANDROID_KEYSTORE_ALIAS,
+#   ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_PASSWORD
+#
+# Si prefieres editar a mano android/local.properties (sin subir a git si contiene secretos),
+# añade las mismas claves MYAPP_UPLOAD_* que escribe el plugin:
+#
+# sdk.dir=C:/Users/TU/AppData/Local/Android/Sdk
+# MYAPP_UPLOAD_STORE_FILE=C:/ruta/a/release.keystore
+# MYAPP_UPLOAD_KEY_ALIAS=tu_alias
+# MYAPP_UPLOAD_STORE_PASSWORD=***
+# MYAPP_UPLOAD_KEY_PASSWORD=***

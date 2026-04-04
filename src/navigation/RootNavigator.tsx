@@ -10,15 +10,7 @@ export default function RootNavigator() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Main" component={TabNavigator} />
-      <Stack.Screen
-        name="UnidadesMedida"
-        component={UnidadesMedidaScreen}
-        options={{
-          headerShown: true,
-          title: 'Unidades de medida',
-          headerBackTitle: 'Volver',
-        }}
-      />
+      <Stack.Screen name="UnidadesMedida" component={UnidadesMedidaScreen} />
     </Stack.Navigator>
   );
 }

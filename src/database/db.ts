@@ -325,6 +325,24 @@ export async function crearUnidadMedida(nombre: string, unidades: number): Promi
   return result.lastInsertRowId;
 }
 
+export async function actualizarUnidadMedida(
+  id: number,
+  nombre: string,
+  unidades: number
+): Promise<void> {
+  const db = await getDatabase();
+  const n = nombre.trim();
+  const u = Math.floor(unidades);
+  if (!n) return Promise.reject(new Error('Nombre requerido'));
+  if (!Number.isFinite(u) || u <= 0) {
+    return Promise.reject(new Error('Unidades inválidas'));
+  }
+  await db.runAsync(
+    `UPDATE unidades_medida SET nombre = ?, unidades = ?, dirty = 1, updated_at = datetime('now') WHERE id = ?`,
+    [n, u, id]
+  );
+}
+
 export async function crearProducto(
   nombre: string,
   precio_venta: number,
