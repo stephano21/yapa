@@ -26,7 +26,7 @@ import {
   type Producto,
   type Cliente,
 } from '../database/db';
-import { useYapaStore } from '../store/useYapaStore';
+import { useYapaStore, type CartItem } from '../store/useYapaStore';
 import type { MetodoPago } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
@@ -88,6 +88,11 @@ export default function HomeScreen() {
     }
   }, [busqueda]);
 
+  const cargarClientes = useCallback(async () => {
+    const list = await getClientes();
+    setClientes(list);
+  }, []);
+
   useEffect(() => {
     cargarProductos();
   }, [cargarProductos]);
@@ -101,11 +106,6 @@ export default function HomeScreen() {
   useEffect(() => {
     if (carritoVisible) cargarClientes();
   }, [carritoVisible, cargarClientes]);
-
-  const cargarClientes = useCallback(async () => {
-    const list = await getClientes();
-    setClientes(list);
-  }, []);
 
   const handleFinalizarVenta = async () => {
     if (items.length === 0 || !metodoPagoSeleccionado) return;

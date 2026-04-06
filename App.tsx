@@ -5,6 +5,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { getDatabase } from './src/database/db';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
+import { AuthProvider } from './src/context/AuthContext';
 import RootNavigator from './src/navigation/RootNavigator';
 
 function AppContent() {
@@ -41,9 +42,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <NavigationContainer>
-          <AppContent />
-        </NavigationContainer>
+        <AuthProvider>
+          <NavigationContainer>
+            <AppContent />
+          </NavigationContainer>
+        </AuthProvider>
       </ThemeProvider>
     </SafeAreaProvider>
   );

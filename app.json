@@ -2,6 +2,7 @@
   "expo": {
     "name": "Yapa",
     "slug": "Yapa",
+    "scheme": "yapa",
     "version": "1.0.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -29,7 +30,10 @@
     },
     "plugins": [
       "./plugins/withLocalProperties.js",
-      "./plugins/withAndroidReleaseSigning.js"
+      "./plugins/withAndroidReleaseSigning.js",
+      "./plugins/withGoogleOAuthAndroid.js",
+      "expo-secure-store",
+      "expo-web-browser"
     ],
     "extra": {
       "eas": {

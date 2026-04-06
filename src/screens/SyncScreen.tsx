@@ -17,6 +17,7 @@ import type { Producto, Cliente } from '../database/db';
 import { getClientes } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
+import PulseAuthSection from '../components/PulseAuthSection';
 
 function formatFecha(iso: string): string {
   return new Date(iso).toLocaleString('es-EC', {
@@ -105,10 +106,13 @@ export default function SyncScreen() {
           <Text style={styles.titulo}>Sincronización</Text>
         </View>
         <Text style={styles.subtitulo}>
-          Datos listos para enviar al servidor cuando conectes un API. Por ahora todo se guarda
-          solo en este dispositivo.
+          Tus datos de ventas e inventario viven en este dispositivo. Inicia sesión cuando quieras
+          enlazar la cuenta Pulse para sincronizar con el servidor (el token no reemplaza tu base
+          local).
         </Text>
       </View>
+
+      <PulseAuthSection />
 
       <View style={styles.cardCuando}>
         <View style={styles.cardCuandoIcon}>
