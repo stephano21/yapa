@@ -45,3 +45,22 @@ export function getGoogleAuthEnv(): {
     androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID?.trim() || shared,
   };
 }
+
+/**
+ * `GoogleSignin.configure({ webClientId })` — Google recomienda el cliente tipo **Web**.
+ * Si solo tienes Android en .env, usamos ese ID para que el botón funcione; si no hay id_token,
+ * crea un cliente Web y `EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID`.
+ */
+export function getGoogleSignInConfigureClientId(): string | undefined {
+  const e = getGoogleAuthEnv();
+  return (
+    e.webClientId?.trim() ||
+    e.androidClientId?.trim() ||
+    e.iosClientId?.trim() ||
+    undefined
+  );
+}
+
+export function hasAnyGoogleClientIdConfigured(): boolean {
+  return getGoogleSignInConfigureClientId() != null;
+}

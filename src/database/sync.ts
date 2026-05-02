@@ -129,6 +129,133 @@ export interface ResumenPendientesSync {
   cobros: number;
 }
 
+/** Producto con `updated_at` para `client_updated_at` en Pulse. */
+export interface ProductoParaPushPulse {
+  id: number;
+  nombre: string;
+  precio_venta: number;
+  precio_costo: number;
+  precio_minimo: number | null;
+  stock: number;
+  updated_at: string;
+}
+
+export async function getProductosParaPushPulse(): Promise<ProductoParaPushPulse[]> {
+  const database = await db();
+  try {
+    return await database.getAllAsync<ProductoParaPushPulse>(
+      `SELECT id, nombre, precio_venta, precio_costo, precio_minimo, stock,
+              COALESCE(updated_at, datetime('now')) AS updated_at
+       FROM productos WHERE dirty = 1 ORDER BY id`
+    );
+  } catch {
+    return [];
+  }
+}
+
+/** Clientes a enviar: dirty o sin `remote_id` pero referenciados por cobros/ventas fiado pendientes. */
+export interface ClienteParaPushPulse {
+  id: number;
+  nombre: string;
+  deuda_inicial: number;
+  saldo_a_favor: number;
+  updated_at: string;
+}
+
+export async function getClientesParaPushPulse(): Promise<ClienteParaPushPulse[]> {
+  const database = await db();
+  try {
+    return await database.getAllAsync<ClienteParaPushPulse>(
+      `SELECT id, nombre,
+              COALESCE(deuda_inicial, 0) AS deuda_inicial,
+              COALESCE(saldo_a_favor, 0) AS saldo_a_favor,
+              COALESCE(updated_at, datetime('now')) AS updated_at
+       FROM clientes
+       WHERE dirty = 1
+          OR (
+            (remote_id IS NULL OR TRIM(remote_id) = '')
+            AND (
+              EXISTS (SELECT 1 FROM cobros b WHERE b.cliente_id = clientes.id AND b.dirty = 1)
+              OR EXISTS (
+                SELECT 1 FROM ventas v
+                WHERE v.cliente_id = clientes.id
+                  AND v.dirty = 1
+                  AND COALESCE(v.estado, 'cobrado') = 'fiado'
+              )
+            )
+          )
+       ORDER BY id`
+    );
+  } catch {
+    return [];
+  }
+}
+
+export interface VentaDetalleLineaPush {
+  descripcion: string;
+  cantidad: number;
+  precio_unitario: number;
+  subtotal: number;
+}
+
+export interface VentaConDetalleParaPush {
+  id: number;
+  fecha: string;
+  total: number;
+  metodo_pago: string;
+  estado: string | null;
+  cliente_id: number | null;
+  lineas: VentaDetalleLineaPush[];
+}
+
+export async function getVentasConDetalleParaPushPulse(): Promise<VentaConDetalleParaPush[]> {
+  const database = await db();
+  let ventas: VentaPendiente[];
+  try {
+    ventas = await database.getAllAsync<VentaPendiente>(
+      'SELECT id, fecha, total, metodo_pago, estado, cliente_id FROM ventas WHERE dirty = 1 ORDER BY id'
+    );
+  } catch {
+    return [];
+  }
+  const out: VentaConDetalleParaPush[] = [];
+  for (const v of ventas) {
+    const lineas = await database.getAllAsync<VentaDetalleLineaPush>(
+      'SELECT descripcion, cantidad, precio_unitario, subtotal FROM venta_detalle WHERE venta_id = ? ORDER BY id',
+      [v.id]
+    );
+    out.push({
+      id: v.id,
+      fecha: v.fecha,
+      total: v.total,
+      metodo_pago: v.metodo_pago,
+      estado: v.estado,
+      cliente_id: v.cliente_id,
+      lineas,
+    });
+  }
+  return out;
+}
+
+export async function getClienteRemoteId(clienteSqliteId: number): Promise<string | null> {
+  const database = await db();
+  const row = await database.getFirstAsync<{ remote_id: string | null }>(
+    'SELECT remote_id FROM clientes WHERE id = ?',
+    [clienteSqliteId]
+  );
+  const r = row?.remote_id?.trim();
+  return r && r.length > 0 ? r : null;
+}
+
+/** Tras sincronizar la cabecera de venta, limpia dirty del detalle local. */
+export async function marcarLineasVentaSincronizadas(ventaId: number): Promise<void> {
+  const database = await db();
+  await database.runAsync(
+    'UPDATE venta_detalle SET dirty = 0, synced_at = datetime("now") WHERE venta_id = ?',
+    [ventaId]
+  );
+}
+
 export async function getResumenPendientesSync(): Promise<ResumenPendientesSync> {
   const database = await db();
   const fallback = async (

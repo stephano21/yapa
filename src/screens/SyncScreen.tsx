@@ -1,5 +1,13 @@
 import { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  ActivityIndicator,
+  Pressable,
+  Alert,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Cloud, Package, Users, ShoppingCart, Banknote, Info } from 'lucide-react-native';
@@ -16,8 +24,10 @@ import {
 import type { Producto, Cliente } from '../database/db';
 import { getClientes } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth, PulseAuthError } from '../context/AuthContext';
 import type { ColorPalette } from '../theme';
 import PulseAuthSection from '../components/PulseAuthSection';
+import { sincronizarPendientesConPulse } from '../api/pulseSync';
 
 function formatFecha(iso: string): string {
   return new Date(iso).toLocaleString('es-EC', {
@@ -32,6 +42,7 @@ function formatFecha(iso: string): string {
 export default function SyncScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const { accessToken } = useAuth();
 
   const [resumen, setResumen] = useState<ResumenPendientesSync | null>(null);
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -40,6 +51,7 @@ export default function SyncScreen() {
   const [cobros, setCobros] = useState<CobroPendiente[]>([]);
   const [clientesMap, setClientesMap] = useState<Record<number, string>>({});
   const [cargando, setCargando] = useState(true);
+  const [sincronizando, setSincronizando] = useState(false);
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -72,6 +84,43 @@ export default function SyncScreen() {
       cargar();
     }, [cargar])
   );
+
+  const onSincronizarPulse = useCallback(() => {
+    if (!accessToken) {
+      Alert.alert('Sincronización', 'Inicia sesión con tu cuenta Pulse para poder enviar datos al servidor.');
+      return;
+    }
+    void (async () => {
+      setSincronizando(true);
+      try {
+        const s = await sincronizarPendientesConPulse(accessToken);
+        const partes: string[] = [];
+        if (s.productos) partes.push(`${s.productos} producto(s)`);
+        if (s.clientes) partes.push(`${s.clientes} cliente(s)`);
+        if (s.ventas) partes.push(`${s.ventas} venta(s)`);
+        if (s.cobros) partes.push(`${s.cobros} cobro(s)`);
+        let mensaje =
+          partes.length > 0
+            ? `Enviado al servidor: ${partes.join(', ')}.`
+            : 'No había registros pendientes de enviar.';
+        if (s.cobrosOmitidosSinClienteRemoto > 0) {
+          mensaje += `\n\n${s.cobrosOmitidosSinClienteRemoto} cobro(s) no se enviaron: el cliente aún no tiene id remoto (sincroniza clientes primero o revisa datos).`;
+        }
+        Alert.alert('Sincronización', mensaje);
+        await cargar();
+      } catch (e) {
+        const msg =
+          e instanceof PulseAuthError
+            ? e.message
+            : e instanceof Error
+              ? e.message
+              : 'Error inesperado';
+        Alert.alert('Sincronización', msg);
+      } finally {
+        setSincronizando(false);
+      }
+    })();
+  }, [accessToken, cargar]);
 
   if (cargando) {
     return (
@@ -114,6 +163,26 @@ export default function SyncScreen() {
 
       <PulseAuthSection />
 
+      <Pressable
+        style={({ pressed }) => [
+          styles.btnSync,
+          {
+            backgroundColor: accessToken ? colors.verde : colors.borde,
+            opacity: pressed || sincronizando || !accessToken ? 0.75 : 1,
+          },
+        ]}
+        onPress={onSincronizarPulse}
+        disabled={!accessToken || sincronizando}
+      >
+        {sincronizando ? (
+          <ActivityIndicator color={colors.onPrimario} />
+        ) : (
+          <Text style={[styles.btnSyncText, { color: accessToken ? colors.onPrimario : colors.textoSuave }]}>
+            {accessToken ? 'Sincronizar con Pulse' : 'Inicia sesión para sincronizar'}
+          </Text>
+        )}
+      </Pressable>
+
       <View style={styles.cardCuando}>
         <View style={styles.cardCuandoIcon}>
           <Info size={20} color={colors.verde} />
@@ -121,9 +190,9 @@ export default function SyncScreen() {
         <View style={styles.cardCuandoTexto}>
           <Text style={styles.cardCuandoTitulo}>¿Cuándo se sincronizan?</Text>
           <Text style={styles.cardCuandoCuerpo}>
-            Se enviarán al servidor cuando tengas configurada la URL del API y pulses el botón de
-            sincronizar en esta pantalla (o cuando la app lo haga automáticamente al tener
-            conexión, si lo implementas así).
+            Con sesión iniciada, pulsa «Sincronizar con Pulse» para enviar productos, clientes, ventas
+            y cobros pendientes al API (orden recomendado por el servidor). Los datos siguen en el
+            teléfono; el servidor guarda copia y te devuelve ids remotos.
           </Text>
         </View>
       </View>
@@ -365,6 +434,18 @@ function createStyles(colors: ColorPalette) {
       marginTop: 24,
       paddingHorizontal: 16,
       lineHeight: 20,
+    },
+    btnSync: {
+      marginBottom: 20,
+      paddingVertical: 14,
+      borderRadius: 14,
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: 48,
+    },
+    btnSyncText: {
+      fontSize: 16,
+      fontWeight: '700',
     },
   });
 }

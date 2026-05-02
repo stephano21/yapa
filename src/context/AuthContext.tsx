@@ -11,6 +11,7 @@ import * as SecureStore from 'expo-secure-store';
 import {
   loginPulseUser,
   loginPulseWithGoogleIdToken,
+  normalizePulseAccessToken,
   PulseAuthError,
   type LoginSuccess,
 } from '../api/pulseAuth';
@@ -65,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           SecureStore.getItemAsync(KEY_EMAIL),
         ]);
         if (!cancelled) {
-          setAccessToken(token);
+          setAccessToken(token ? normalizePulseAccessToken(token) : null);
           setUserEmail(email);
         }
       } catch {
@@ -83,13 +84,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const persistSession = useCallback(async (token: string, email: string | null) => {
-    await SecureStore.setItemAsync(KEY_ACCESS, token);
+    const normalized = normalizePulseAccessToken(token);
+    await SecureStore.setItemAsync(KEY_ACCESS, normalized);
     if (email) {
       await SecureStore.setItemAsync(KEY_EMAIL, email);
     } else {
       await SecureStore.deleteItemAsync(KEY_EMAIL);
     }
-    setAccessToken(token);
+    setAccessToken(normalized);
     setUserEmail(email);
   }, []);
 

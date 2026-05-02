@@ -33,6 +33,7 @@ import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
 import ComprobanteModal from '../components/ComprobanteModal';
 import type { ComprobanteVenta } from '../database/db';
+import { getFechaLocalYYYYMMDD } from '../utils/dateLocal';
 
 function formatHora(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-EC', {
@@ -122,7 +123,7 @@ export default function BalanceScreen() {
   >([]);
 
   const esHoy = fechaSeleccionada === null;
-  const fechaParaCargar = fechaSeleccionada ?? new Date().toISOString().slice(0, 10);
+  const fechaParaCargar = fechaSeleccionada ?? getFechaLocalYYYYMMDD();
 
   const cargar = useCallback(async () => {
     setCargando(true);
@@ -256,8 +257,13 @@ export default function BalanceScreen() {
       .map(([metodo, m]) => `${metodo}: $${m.toFixed(2)}`);
     const detalle = partes.length > 0 ? ` (${partes.join(', ')})` : '';
     const cobradoFiado =
-      totalFiado > 0
-        ? ` Cobrado: $${totalCobrado.toFixed(2)}, Fiado: $${totalFiado.toFixed(2)}.`
+      totalCobrado > 0 || totalFiado > 0
+        ? ` ${[
+            totalCobrado > 0 ? `Cobrado: $${totalCobrado.toFixed(2)}` : null,
+            totalFiado > 0 ? `Fiado pendiente: $${totalFiado.toFixed(2)}` : null,
+          ]
+            .filter(Boolean)
+            .join(', ')}.`
         : '';
     const frase =
       totalVentas > 0
@@ -325,7 +331,7 @@ export default function BalanceScreen() {
               Cobrado: ${totalCobrado.toFixed(2)}
             </Text>
             {totalFiado > 0 && (
-              <Text style={styles.filaFiadoTexto}>Fiado: ${totalFiado.toFixed(2)}</Text>
+              <Text style={styles.filaFiadoTexto}>Fiado pendiente: ${totalFiado.toFixed(2)}</Text>
             )}
           </View>
         )}

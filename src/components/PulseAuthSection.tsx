@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,8 +9,12 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
-import * as Google from 'expo-auth-session/providers/google';
+import {
+  GoogleSignin,
+  statusCodes,
+  isErrorWithCode,
+  isCancelledResponse,
+} from '@react-native-google-signin/google-signin';
 import { LogIn, UserPlus, LogOut } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
@@ -18,19 +22,85 @@ import {
   registerPulseUser,
   resendPulseConfirmation,
 } from '../api/pulseAuth';
-import { getGoogleAuthEnv, isPulseApiConfigured } from '../config/pulse';
-import { getGoogleAndroidOAuthRedirectUri } from '../utils/googleOAuthRedirect';
+import {
+  getGoogleAuthEnv,
+  getGoogleSignInConfigureClientId,
+  hasAnyGoogleClientIdConfigured,
+  isPulseApiConfigured,
+} from '../config/pulse';
+import {
+  ANDROID_PACKAGE_FOR_GOOGLE,
+  GOOGLE_CLOUD_ANDROID_DEBUG_SHA1,
+  GOOGLE_CLOUD_ANDROID_RELEASE_SHA1,
+} from '../config/googleAndroidSigning';
 import type { ColorPalette } from '../theme';
-
-WebBrowser.maybeCompleteAuthSession();
 
 type ModoAuth = 'login' | 'registro';
 
+/** Sign-In nativo: al menos un Client ID en .env (Web, Android, iOS o EXPO_PUBLIC_GOOGLE_CLIENT_ID). */
 function googleConfigOk(): boolean {
+  if (Platform.OS === 'web') return false;
+  return hasAnyGoogleClientIdConfigured();
+}
+
+function GoogleNativeChecklist({ colors }: { colors: ColorPalette }) {
+  if (!__DEV__ || Platform.OS === 'web') return null;
   const env = getGoogleAuthEnv();
-  if (Platform.OS === 'android') return !!env.androidClientId;
-  if (Platform.OS === 'ios') return !!env.iosClientId;
-  return !!env.webClientId;
+  const webPreview =
+    env.webClientId && env.webClientId.length > 36
+      ? `…${env.webClientId.slice(-40)}`
+      : env.webClientId || '(falta EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID)';
+  const androidPreview =
+    env.androidClientId && env.androidClientId.length > 36
+      ? `…${env.androidClientId.slice(-40)}`
+      : env.androidClientId || '(recomendado: EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID)';
+  return (
+    <View
+      style={{
+        marginTop: 10,
+        padding: 12,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: colors.borde,
+        backgroundColor: colors.fondo,
+      }}
+    >
+      <Text style={{ fontWeight: '700', color: colors.texto, marginBottom: 8, fontSize: 13 }}>
+        Google Sign-In nativo (Play Services / cuenta Google del sistema)
+      </Text>
+      <Text style={{ fontSize: 12, color: colors.textoSuave, lineHeight: 18 }}>
+        Ideal: <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID</Text> (cliente tipo{' '}
+        <Text style={{ fontWeight: '700' }}>Aplicación web</Text>; suele coincidir con la validación del
+        API). Si solo tienes cliente Android en .env, el botón igual aparece; si no hay{' '}
+        <Text style={{ fontWeight: '700' }}>id_token</Text>, añade el cliente Web.{'\n'}
+        <Text style={{ fontWeight: '600', color: colors.texto }} selectable>
+          {webPreview}
+        </Text>
+        {'\n\n'}
+        En el mismo proyecto, credencial <Text style={{ fontWeight: '700' }}>Android</Text> con package{' '}
+        <Text style={{ fontWeight: '700' }} selectable>
+          {ANDROID_PACKAGE_FOR_GOOGLE}
+        </Text>{' '}
+        y <Text style={{ fontWeight: '700' }}>ambos SHA-1</Text> (debug + release):{'\n'}
+        <Text style={{ fontWeight: '600' }} selectable>
+          {GOOGLE_CLOUD_ANDROID_DEBUG_SHA1}
+        </Text>
+        {'\n'}
+        <Text style={{ fontWeight: '600' }} selectable>
+          {GOOGLE_CLOUD_ANDROID_RELEASE_SHA1}
+        </Text>
+        {'\n'}
+        Cliente Android en .env:{' '}
+        <Text style={{ fontWeight: '600', color: colors.texto }} selectable>
+          {androidPreview}
+        </Text>
+        {'\n\n'}
+        Tras cambiar .env: <Text style={{ fontWeight: '700' }}>npx expo prebuild -p android</Text> y{' '}
+        <Text style={{ fontWeight: '700' }}>npx expo run:android</Text>. Consentimiento: si el app está
+        en pruebas, tu correo como <Text style={{ fontWeight: '700' }}>usuario de prueba</Text>.
+      </Text>
+    </View>
+  );
 }
 
 const googleStaticStyles = StyleSheet.create({
@@ -50,46 +120,66 @@ const googleStaticStyles = StyleSheet.create({
 function GoogleSignInButton({ colors }: { colors: ColorPalette }) {
   const { signInWithGoogleIdToken } = useAuth();
   const env = getGoogleAuthEnv();
+  const configureClientId = getGoogleSignInConfigureClientId();
   const [busy, setBusy] = useState(false);
-  const handledRef = useRef<string | null>(null);
-
-  const androidRedirectUri =
-    Platform.OS === 'android'
-      ? getGoogleAndroidOAuthRedirectUri(env.androidClientId)
-      : undefined;
-
-  const [request, response, promptAsync] = Google.useIdTokenAuthRequest({
-    webClientId: env.webClientId,
-    iosClientId: env.iosClientId,
-    androidClientId: env.androidClientId,
-    ...(androidRedirectUri ? { redirectUri: androidRedirectUri } : {}),
-  });
 
   useEffect(() => {
-    if (!__DEV__ || Platform.OS !== 'android') return;
-    console.log('[Google OAuth] redirect_uri (debe coincidir con AndroidManifest):', androidRedirectUri ?? '(sin URI — revisa Client ID Android)');
-  }, [androidRedirectUri]);
-
-  useEffect(() => {
-    if (response?.type === 'error') {
-      console.warn('[Google OAuth] respuesta error', response.error, response.params);
+    if (Platform.OS === 'web' || !configureClientId) return;
+    GoogleSignin.configure({
+      webClientId: configureClientId,
+      ...(env.iosClientId?.trim() ? { iosClientId: env.iosClientId.trim() } : {}),
+      offlineAccess: false,
+    });
+    if (__DEV__) {
+      console.log('[Google Sign-In nativo] configure(webClientId) ←', configureClientId.slice(-30));
     }
-  }, [response]);
+  }, [configureClientId, env.iosClientId]);
 
-  useEffect(() => {
-    if (response?.type !== 'success') return;
-    const idToken = response.params.id_token;
-    if (!idToken || typeof idToken !== 'string') return;
-    if (handledRef.current === idToken) return;
-    handledRef.current = idToken;
-    setBusy(true);
-    signInWithGoogleIdToken(idToken)
-      .catch((e: unknown) => {
-        const msg = e instanceof PulseAuthError ? e.message : 'No se pudo iniciar sesión con Google';
+  const onPress = () => {
+    void (async () => {
+      if (Platform.OS === 'web') {
+        Alert.alert('Google', 'El inicio con Google nativo solo está disponible en la app Android/iOS.');
+        return;
+      }
+      if (!configureClientId) {
+        Alert.alert('Google', 'Define al menos un Client ID de Google en .env (Android, Web o GOOGLE_CLIENT_ID).');
+        return;
+      }
+      setBusy(true);
+      try {
+        await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+        const signInResult = await GoogleSignin.signIn();
+        if (isCancelledResponse(signInResult)) {
+          return;
+        }
+        let idToken = signInResult.data.idToken;
+        if (!idToken) {
+          const tokens = await GoogleSignin.getTokens();
+          idToken = tokens.idToken;
+        }
+        if (!idToken) {
+          throw new Error(
+            'Sin id_token. Crea un cliente tipo Web en Google Cloud y define EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (el Android solo en .env no siempre basta). Revisa SHA-1 y package.'
+          );
+        }
+        const emailHint = signInResult.data.user.email;
+        await signInWithGoogleIdToken(idToken, emailHint);
+      } catch (e: unknown) {
+        if (isErrorWithCode(e) && e.code === statusCodes.SIGN_IN_CANCELLED) {
+          return;
+        }
+        if (__DEV__) {
+          console.warn('[Google Sign-In nativo]', e);
+        }
+        const msg = e instanceof Error ? e.message : 'Error al iniciar sesión con Google';
         Alert.alert('Google', msg);
-      })
-      .finally(() => setBusy(false));
-  }, [response, signInWithGoogleIdToken]);
+      } finally {
+        setBusy(false);
+      }
+    })();
+  };
+
+  const disabled = busy || Platform.OS === 'web' || !configureClientId;
 
   return (
     <Pressable
@@ -98,13 +188,11 @@ function GoogleSignInButton({ colors }: { colors: ColorPalette }) {
         {
           backgroundColor: colors.superficie,
           borderColor: colors.borde,
-          opacity: pressed || !request || busy ? 0.7 : 1,
+          opacity: pressed || disabled ? 0.7 : 1,
         },
       ]}
-      disabled={!request || busy}
-      onPress={() => {
-        void promptAsync();
-      }}
+      disabled={disabled}
+      onPress={onPress}
     >
       {busy ? (
         <ActivityIndicator color={colors.texto} />
@@ -360,22 +448,24 @@ export default function PulseAuthSection() {
             <View style={[styles.divider, { backgroundColor: colors.borde }]} />
           </View>
           <GoogleSignInButton colors={colors} />
-          <Text style={[styles.googleHint, { color: colors.textoSuave }]}>
-            Si Google muestra «solicitud no válida»: (1) Cliente OAuth tipo Android con package{' '}
-            <Text style={{ fontWeight: '700' }}>com.stynger.Yapa</Text> y el SHA-1 del keystore con
-            el que firmas el APK (debug distinto de release). (2){' '}
-            <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID</Text> debe ser
-            ese cliente Android. (3) En <Text style={{ fontWeight: '700' }}>AndroidManifest</Text> el{' '}
-            <Text style={{ fontWeight: '700' }}>scheme</Text> debe ser{' '}
-            com.googleusercontent.apps.{'{tu_id}'} — al cambiar el Client ID, actualiza el manifest o
-            vuelve a generar android. (4) Opcional: cliente Web en el mismo proyecto y{' '}
-            EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID. En consola Metro verás [Google OAuth] redirect_uri.
-          </Text>
+          <GoogleNativeChecklist colors={colors} />
+          {__DEV__ ? (
+            <Text style={[styles.googleHint, { color: colors.textoSuave, marginTop: 8 }]}>
+              No usa navegador: SDK nativo. Tras cambiar variables Google en .env,{' '}
+              <Text style={{ fontWeight: '700' }}>npx expo prebuild</Text> y{' '}
+              <Text style={{ fontWeight: '700' }}>npx expo run:android</Text>.
+            </Text>
+          ) : null}
         </View>
       ) : (
-        <Text style={[styles.googleHint, { color: colors.textoSuave, marginTop: 8 }]}>
-          Opcional: añade IDs de cliente Google en .env para mostrar el botón de Google.
-        </Text>
+        __DEV__ ? (
+          <Text style={[styles.googleHint, { color: colors.textoSuave, marginTop: 8 }]}>
+            En móvil: define <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID</Text>,{' '}
+            <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID</Text> o{' '}
+            <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_CLIENT_ID</Text> y reinicia Metro (
+            <Text style={{ fontWeight: '700' }}>npx expo start -c</Text>).
+          </Text>
+        ) : null
       )}
     </View>
   );

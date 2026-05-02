@@ -1,5 +1,6 @@
 import * as SQLite from 'expo-sqlite';
 import type { SQLiteDatabase } from 'expo-sqlite';
+import { getFechaHoraLocalParaDb, getFechaLocalYYYYMMDD } from '../utils/dateLocal';
 
 const DB_NAME = 'yapa_pos.db';
 
@@ -394,7 +395,7 @@ export async function registrarVentaConDetalle(
   opciones?: { esFiado?: boolean; clienteId?: number }
 ): Promise<ComprobanteVenta> {
   const db = await getDatabase();
-  const fecha = new Date().toISOString();
+  const fecha = getFechaHoraLocalParaDb();
   const estado = opciones?.esFiado ? 'fiado' : 'cobrado';
   const clienteId = opciones?.esFiado && opciones?.clienteId != null ? opciones.clienteId : null;
 
@@ -462,7 +463,7 @@ export async function getVentasHoy(): Promise<
   { total: number; metodo_pago: string; estado: string }[]
 > {
   const db = await getDatabase();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = getFechaLocalYYYYMMDD();
   return db.getAllAsync<{ total: number; metodo_pago: string; estado: string }>(
     'SELECT total, metodo_pago, COALESCE(estado, "cobrado") as estado FROM ventas WHERE date(fecha) = ? ORDER BY fecha',
     [hoy]
@@ -474,11 +475,70 @@ export async function getVentasDelDiaConId(): Promise<
   { id: number; fecha: string; total: number; metodo_pago: string }[]
 > {
   const db = await getDatabase();
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = getFechaLocalYYYYMMDD();
   return db.getAllAsync<{ id: number; fecha: string; total: number; metodo_pago: string }>(
     'SELECT id, fecha, total, metodo_pago FROM ventas WHERE date(fecha) = ? ORDER BY fecha DESC',
     [hoy]
   );
+}
+
+/**
+ * Monto aún pendiente por cada venta fiada (FIFO: primero deuda inicial, luego ventas por fecha).
+ * Coherente con getDeudaCliente.
+ */
+async function getPendientePorVentaFiadoCliente(clienteId: number): Promise<Map<number, number>> {
+  const db = await getDatabase();
+  const cliente = await db.getFirstAsync<{ deuda_inicial: number; saldo_a_favor: number }>(
+    'SELECT COALESCE(deuda_inicial, 0) as deuda_inicial, COALESCE(saldo_a_favor, 0) as saldo_a_favor FROM clientes WHERE id = ?',
+    [clienteId]
+  );
+  const cobros = await db.getFirstAsync<{ total: number }>(
+    'SELECT COALESCE(SUM(monto), 0) as total FROM cobros WHERE cliente_id = ?',
+    [clienteId]
+  );
+  const ventas = await db.getAllAsync<{ id: number; total: number }>(
+    `SELECT id, total FROM ventas 
+     WHERE cliente_id = ? AND COALESCE(estado, 'cobrado') = 'fiado' 
+     ORDER BY fecha ASC, id ASC`,
+    [clienteId]
+  );
+  let remaining = (cobros?.total ?? 0) + (cliente?.saldo_a_favor ?? 0);
+  const di = cliente?.deuda_inicial ?? 0;
+  remaining -= Math.min(remaining, di);
+
+  const map = new Map<number, number>();
+  for (const v of ventas) {
+    const paid = Math.min(remaining, v.total);
+    map.set(v.id, v.total - paid);
+    remaining -= paid;
+  }
+  return map;
+}
+
+/** Suma fiado aún no cubierto por cobros (solo ventas fiadas de ese día civil). */
+async function totalFiadoPendienteVentasDelDia(fecha: string): Promise<number> {
+  const db = await getDatabase();
+  const filas = await db.getAllAsync<{
+    id: number;
+    cliente_id: number | null;
+    total: number;
+    estado: string;
+  }>(
+    `SELECT id, cliente_id, total, COALESCE(estado, 'cobrado') as estado 
+     FROM ventas WHERE date(fecha) = ?`,
+    [fecha]
+  );
+  const cache = new Map<number, Map<number, number>>();
+  let sum = 0;
+  for (const r of filas) {
+    if (r.estado !== 'fiado' || r.cliente_id == null) continue;
+    if (!cache.has(r.cliente_id)) {
+      cache.set(r.cliente_id, await getPendientePorVentaFiadoCliente(r.cliente_id));
+    }
+    const m = cache.get(r.cliente_id)!;
+    sum += m.get(r.id) ?? r.total;
+  }
+  return sum;
 }
 
 export async function getResumenHoy(): Promise<{
@@ -491,7 +551,7 @@ export async function getResumenHoy(): Promise<{
   const ventas = await getVentasHoy();
   const totalVentas = ventas.reduce((s, v) => s + v.total, 0);
   const totalCobrado = ventas.filter((v) => (v.estado ?? 'cobrado') === 'cobrado').reduce((s, v) => s + v.total, 0);
-  const totalFiado = ventas.filter((v) => v.estado === 'fiado').reduce((s, v) => s + v.total, 0);
+  const totalFiado = await totalFiadoPendienteVentasDelDia(getFechaLocalYYYYMMDD());
   const porMetodo: Record<string, number> = {};
   ventas.forEach((v) => {
     porMetodo[v.metodo_pago] = (porMetodo[v.metodo_pago] ?? 0) + v.total;
@@ -506,7 +566,7 @@ export async function getResumenHoy(): Promise<{
 }
 
 export async function getGananciaEstimadaHoy(): Promise<number> {
-  return getGananciaEstimadaPorFecha(new Date().toISOString().slice(0, 10));
+  return getGananciaEstimadaPorFecha(getFechaLocalYYYYMMDD());
 }
 
 export async function getGananciaEstimadaPorFecha(fecha: string): Promise<number> {
@@ -543,7 +603,7 @@ export async function getResumenPorFecha(fecha: string): Promise<{
   );
   const totalVentas = ventas.reduce((s, v) => s + v.total, 0);
   const totalCobrado = ventas.filter((v) => (v.estado ?? 'cobrado') === 'cobrado').reduce((s, v) => s + v.total, 0);
-  const totalFiado = ventas.filter((v) => v.estado === 'fiado').reduce((s, v) => s + v.total, 0);
+  const totalFiado = await totalFiadoPendienteVentasDelDia(fecha);
   const porMetodo: Record<string, number> = {};
   ventas.forEach((v) => {
     porMetodo[v.metodo_pago] = (porMetodo[v.metodo_pago] ?? 0) + v.total;
@@ -583,7 +643,7 @@ export async function getDiasConVentas(limite: number): Promise<
     porDia[d].total += r.total;
     porDia[d].count += 1;
   });
-  const hoy = new Date().toISOString().slice(0, 10);
+  const hoy = getFechaLocalYYYYMMDD();
   const dias = Object.entries(porDia)
     .filter(([f]) => f !== hoy)
     .sort((a, b) => b[0].localeCompare(a[0]))
@@ -705,7 +765,7 @@ export async function getClientesConDeuda(): Promise<{ id: number; nombre: strin
 
 export async function registrarCobro(clienteId: number, monto: number): Promise<number> {
   const db = await getDatabase();
-  const fecha = new Date().toISOString();
+  const fecha = getFechaHoraLocalParaDb();
   const result = await db.runAsync(
     `INSERT INTO cobros (cliente_id, monto, fecha, dirty, created_at) VALUES (?, ?, ?, 1, datetime('now'))`,
     [clienteId, monto, fecha]

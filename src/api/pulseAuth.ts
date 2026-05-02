@@ -77,6 +77,56 @@ function problemFromBody(body: unknown): ProblemDetails | undefined {
   return undefined;
 }
 
+/** Quita espacios y un posible prefijo `Bearer ` duplicado (algunos backends lo incluyen en el valor). */
+export function normalizePulseAccessToken(token: string): string {
+  let t = token.trim();
+  if (/^bearer\s+/i.test(t)) {
+    t = t.replace(/^bearer\s+/i, '').trim();
+  }
+  return t;
+}
+
+function extractAccessTokenFromLoginBody(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null;
+  const o = body as Record<string, unknown>;
+  const keys = ['access_token', 'accessToken', 'AccessToken', 'token', 'Token'] as const;
+  for (const k of keys) {
+    const v = o[k];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  const data = o.data;
+  if (data && typeof data === 'object') {
+    return extractAccessTokenFromLoginBody(data);
+  }
+  return null;
+}
+
+function parseLoginSuccessBody(body: unknown): LoginSuccess {
+  const raw = extractAccessTokenFromLoginBody(body);
+  if (!raw) {
+    throw new PulseAuthError(
+      'El servidor no devolvió access_token (revisa el JSON de login: access_token / accessToken).',
+      500
+    );
+  }
+  const access_token = normalizePulseAccessToken(raw);
+  if (access_token.length < 8) {
+    throw new PulseAuthError('Token de acceso inválido o vacío.', 500);
+  }
+  const o = body as Record<string, unknown>;
+  const token_type =
+    (typeof o.token_type === 'string' && o.token_type.trim()) ||
+    (typeof o.tokenType === 'string' && o.tokenType.trim()) ||
+    'Bearer';
+  let expires_in = 3600;
+  if (typeof o.expires_in === 'number' && Number.isFinite(o.expires_in)) {
+    expires_in = o.expires_in;
+  } else if (typeof o.expiresIn === 'number' && Number.isFinite(o.expiresIn)) {
+    expires_in = o.expiresIn;
+  }
+  return { access_token, token_type, expires_in };
+}
+
 async function handleAuthResponse<T>(res: Response, context: string): Promise<T> {
   const body = await parseJsonBody(res);
   if (res.ok) {
@@ -140,7 +190,31 @@ export async function loginPulseUser(
       body: JSON.stringify({ email, password }),
     }
   );
-  return handleAuthResponse<LoginSuccess>(res, 'login');
+  const body = await parseJsonBody(res);
+  if (!res.ok) {
+    const problem = problemFromBody(body);
+    const msg =
+      problem?.detail ||
+      problem?.title ||
+      (typeof body === 'object' &&
+        body &&
+        'message' in body &&
+        typeof (body as { message?: string }).message === 'string' &&
+        (body as { message: string }).message) ||
+      res.statusText ||
+      'Error de autenticación';
+    console.warn(`[PulseAuth] Error login`, {
+      status: res.status,
+      url: res.url || '(respuesta sin url)',
+      problem,
+      body,
+    });
+    throw new PulseAuthError(String(msg), res.status, problem);
+  }
+  if (__DEV__) {
+    console.log(`[PulseAuth] OK login`, res.status);
+  }
+  return parseLoginSuccessBody(body);
 }
 
 export async function loginPulseWithGoogleIdToken(
@@ -158,7 +232,31 @@ export async function loginPulseWithGoogleIdToken(
       body: JSON.stringify({ id_token: idToken }),
     }
   );
-  return handleAuthResponse<LoginSuccess>(res, 'google');
+  const body = await parseJsonBody(res);
+  if (!res.ok) {
+    const problem = problemFromBody(body);
+    const msg =
+      problem?.detail ||
+      problem?.title ||
+      (typeof body === 'object' &&
+        body &&
+        'message' in body &&
+        typeof (body as { message?: string }).message === 'string' &&
+        (body as { message: string }).message) ||
+      res.statusText ||
+      'Error de autenticación';
+    console.warn(`[PulseAuth] Error google`, {
+      status: res.status,
+      url: res.url || '(respuesta sin url)',
+      problem,
+      body,
+    });
+    throw new PulseAuthError(String(msg), res.status, problem);
+  }
+  if (__DEV__) {
+    console.log(`[PulseAuth] OK google`, res.status);
+  }
+  return parseLoginSuccessBody(body);
 }
 
 /** Cabeceras para endpoints protegidos (`/v1/sync/...`, etc.) */
@@ -167,8 +265,12 @@ export function pulseAuthorizedHeaders(accessToken: string | null): Record<strin
     Accept: 'application/json',
     'Content-Type': 'application/json',
   };
-  if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
+  const t =
+    typeof accessToken === 'string' && accessToken.trim()
+      ? normalizePulseAccessToken(accessToken)
+      : '';
+  if (t) {
+    headers.Authorization = `Bearer ${t}`;
   }
   return headers;
 }
