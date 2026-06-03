@@ -4,6 +4,7 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { getDatabase } from './src/database/db';
+import { configureGoogleSignInOnce } from './src/config/googleSignIn';
 import { ThemeProvider, useTheme } from './src/context/ThemeContext';
 import { AuthProvider } from './src/context/AuthContext';
 import RootNavigator from './src/navigation/RootNavigator';
@@ -13,6 +14,7 @@ function AppContent() {
   const { colors, isDark } = useTheme();
 
   useEffect(() => {
+    configureGoogleSignInOnce();
     getDatabase()
       .then(() => setListo(true))
       .catch((e) => {

@@ -1,0 +1,3 @@
+- [Arquitectura del proyecto](project_architecture.md) — Stack Expo bare + SQLite offline-first + Pulse API; estructura de carpetas, dos DBs (legacy yapa.db + activa yapa_pos.db)
+- [Flujo de autenticación](auth_flow.md) — Login email/password y OAuth Google, JWT en SecureStore, sin refresh token, gate de nav por linked flag
+- [Sincronización offline→online](sync_migration.md) — dirty flag, push-only, orden productos→clientes→ventas→cobros, sin idempotencia ni pull ni reintentos

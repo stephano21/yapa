@@ -12,6 +12,7 @@ import {
   loginPulseUser,
   loginPulseWithGoogleIdToken,
   normalizePulseAccessToken,
+  isJwtExpired,
   PulseAuthError,
   type LoginSuccess,
 } from '../api/pulseAuth';
@@ -65,8 +66,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           SecureStore.getItemAsync(KEY_ACCESS),
           SecureStore.getItemAsync(KEY_EMAIL),
         ]);
-        if (!cancelled) {
-          setAccessToken(token ? normalizePulseAccessToken(token) : null);
+        const normalized = token ? normalizePulseAccessToken(token) : null;
+        // Si el JWT ya venció, descártalo en la hidratación para que el gate
+        // de navegación exija iniciar sesión en lugar de fallar luego con 401.
+        if (normalized && isJwtExpired(normalized)) {
+          await SecureStore.deleteItemAsync(KEY_ACCESS).catch(() => {});
+          await SecureStore.deleteItemAsync(KEY_EMAIL).catch(() => {});
+          if (!cancelled) {
+            setAccessToken(null);
+            setUserEmail(null);
+          }
+        } else if (!cancelled) {
+          setAccessToken(normalized);
           setUserEmail(email);
         }
       } catch {

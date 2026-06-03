@@ -18,13 +18,62 @@ import {
 } from '../database/sync';
 import { setPulseAccountLinked } from '../storage/pulseLinkStorage';
 
+export type PulseSyncEntidad = 'productos' | 'clientes' | 'ventas' | 'cobros';
+
+export type PulseSyncError = {
+  entidad: PulseSyncEntidad;
+  mensaje: string;
+};
+
 export type PulseSyncSummary = {
   productos: number;
   clientes: number;
   ventas: number;
   cobros: number;
   cobrosOmitidosSinClienteRemoto: number;
+  /** Entidades que fallaron por red/servidor (no 401). El resto sí se envió. */
+  errores: PulseSyncError[];
 };
+
+/**
+ * Clave de idempotencia estable por registro. El servidor debe deduplicar
+ * reintentos con la misma `mutation_id` (guardarla 24–72 h). Ver docs/backend.md §5.3.
+ * - productos/clientes: incluyen la versión (`client_updated_at`) para que una
+ *   edición legítima genere una clave nueva (= update), y un reintento del mismo
+ *   estado reutilice la clave (= dedupe).
+ * - ventas/cobros: append-only en el dispositivo, basta entidad + local_id.
+ */
+function mutationId(entidad: string, localId: number, version?: string): string {
+  const v = version?.trim();
+  return v ? `${entidad}:${localId}:${v}` : `${entidad}:${localId}`;
+}
+
+/** Lanza si el error es de autenticación (401/403): toda la tanda debe abortar. */
+function isAuthError(e: unknown): boolean {
+  return e instanceof PulseAuthError && (e.status === 401 || e.status === 403);
+}
+
+/**
+ * Ejecuta el push de una entidad de forma aislada: un fallo de red/servidor
+ * (no-auth) se registra en `summary.errores` y permite continuar con el resto.
+ * Un 401/403 se propaga para abortar (la sesión es inválida o expiró).
+ */
+async function pushEntidad(
+  entidad: PulseSyncEntidad,
+  summary: PulseSyncSummary,
+  fn: () => Promise<void>
+): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    if (isAuthError(e)) throw e;
+    summary.errores.push({
+      entidad,
+      mensaje: e instanceof Error ? e.message : String(e),
+    });
+    if (__DEV__) console.warn(`[PulseSync] entidad ${entidad} falló (continúa el resto):`, e);
+  }
+}
 
 type SyncResultItem = {
   local_id: number;
@@ -187,58 +236,76 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     ventas: 0,
     cobros: 0,
     cobrosOmitidosSinClienteRemoto: 0,
+    errores: [],
   };
 
-  const prods = await getProductosParaPushPulse();
-  if (prods.length > 0) {
+  await pushEntidad('productos', summary, async () => {
+    const prods = await getProductosParaPushPulse();
+    if (prods.length === 0) return;
     const body = {
-      items: prods.map((p) => ({
-        local_id: p.id,
-        nombre: p.nombre,
-        precio_venta: p.precio_venta,
-        precio_costo: p.precio_costo,
-        precio_minimo: p.precio_minimo,
-        stock: p.stock,
-        client_updated_at: sqliteDateToIso(p.updated_at),
-      })),
+      items: prods.map((p) => {
+        const clientUpdatedAt = sqliteDateToIso(p.updated_at);
+        return {
+          local_id: p.id,
+          mutation_id: mutationId('producto', p.id, clientUpdatedAt),
+          nombre: p.nombre,
+          precio_venta: p.precio_venta,
+          precio_costo: p.precio_costo,
+          precio_minimo: p.precio_minimo,
+          stock: p.stock,
+          client_updated_at: clientUpdatedAt,
+        };
+      }),
     };
     const batch = await postSync('POST productos', '/productos', accessToken, body);
     await applyProductoResults(batch.results);
-    summary.productos = prods.length;
-  }
+    summary.productos = body.items.length;
+  });
 
-  const clis = await getClientesParaPushPulse();
-  if (clis.length > 0) {
+  await pushEntidad('clientes', summary, async () => {
+    const clis = await getClientesParaPushPulse();
+    if (clis.length === 0) return;
     const body = {
-      items: clis.map((c) => ({
-        local_id: c.id,
-        nombre: c.nombre,
-        deuda_inicial: c.deuda_inicial,
-        saldo_a_favor: c.saldo_a_favor,
-        client_updated_at: sqliteDateToIso(c.updated_at),
-      })),
+      items: clis.map((c) => {
+        const clientUpdatedAt = sqliteDateToIso(c.updated_at);
+        return {
+          local_id: c.id,
+          mutation_id: mutationId('cliente', c.id, clientUpdatedAt),
+          nombre: c.nombre,
+          deuda_inicial: c.deuda_inicial,
+          saldo_a_favor: c.saldo_a_favor,
+          client_updated_at: clientUpdatedAt,
+        };
+      }),
     };
     const batch = await postSync('POST clientes', '/clientes', accessToken, body);
     await applyClienteResults(batch.results);
-    summary.clientes = clis.length;
-  }
+    summary.clientes = body.items.length;
+  });
 
-  const ventas = await getVentasConDetalleParaPushPulse();
-  if (ventas.length > 0) {
+  await pushEntidad('ventas', summary, async () => {
+    const ventas = await getVentasConDetalleParaPushPulse();
+    if (ventas.length === 0) return;
     const items = ventas.map((v) => {
       const estado = (v.estado ?? 'cobrado') as 'cobrado' | 'fiado';
       const base: Record<string, unknown> = {
         local_id: v.id,
+        mutation_id: mutationId('venta', v.id),
         fecha: sqliteDateToIso(v.fecha),
         total: v.total,
         metodo_pago: v.metodo_pago,
         estado,
-        line_items: v.lineas.map((ln) => ({
-          descripcion: ln.descripcion,
-          cantidad: ln.cantidad,
-          precio_unitario: ln.precio_unitario,
-          subtotal: ln.subtotal,
-        })),
+        line_items: v.lineas.map((ln) => {
+          const linea: Record<string, unknown> = {
+            descripcion: ln.descripcion,
+            cantidad: ln.cantidad,
+            precio_unitario: ln.precio_unitario,
+            subtotal: ln.subtotal,
+          };
+          if (ln.producto_local_id != null) linea.producto_local_id = ln.producto_local_id;
+          if (ln.producto_remote_id) linea.producto_remote_id = ln.producto_remote_id;
+          return linea;
+        }),
       };
       if (v.cliente_id != null && v.cliente_id > 0) {
         base.cliente_local_id = v.cliente_id;
@@ -247,39 +314,41 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     });
     const batch = await postSync('POST ventas', '/ventas', accessToken, { items });
     await applyVentaResults(batch.results);
-    summary.ventas = ventas.length;
-  }
+    summary.ventas = items.length;
+  });
 
-  const cobrosRaw = await getCobrosPendientesSync();
-  const cobrosItems: { local_id: number; cliente_id: string; monto: number; fecha: string }[] = [];
-  for (const c of cobrosRaw) {
-    const rid = await getClienteRemoteId(c.cliente_id);
-    if (!rid) {
-      summary.cobrosOmitidosSinClienteRemoto += 1;
-      continue;
-    }
-    cobrosItems.push({
-      local_id: c.id,
-      cliente_id: rid,
-      monto: c.monto,
-      fecha: sqliteDateToIso(c.fecha),
-    });
-  }
-
-  if (cobrosItems.length > 0) {
-    const body = {
-      items: cobrosItems.map((c) => ({
-        local_id: c.local_id,
-        cliente_id: c.cliente_id,
+  await pushEntidad('cobros', summary, async () => {
+    const cobrosRaw = await getCobrosPendientesSync();
+    const cobrosItems: {
+      local_id: number;
+      mutation_id: string;
+      cliente_id: string;
+      monto: number;
+      fecha: string;
+    }[] = [];
+    for (const c of cobrosRaw) {
+      const rid = await getClienteRemoteId(c.cliente_id);
+      if (!rid) {
+        // Sin remote_id del cliente aún: el cobro NO se marca sincronizado,
+        // reintenta en la próxima tanda una vez que el cliente tenga remote_id.
+        summary.cobrosOmitidosSinClienteRemoto += 1;
+        continue;
+      }
+      cobrosItems.push({
+        local_id: c.id,
+        mutation_id: mutationId('cobro', c.id),
+        cliente_id: rid,
         monto: c.monto,
-        fecha: c.fecha,
-      })),
-    };
-    const batch = await postSync('POST cobros', '/cobros', accessToken, body);
+        fecha: sqliteDateToIso(c.fecha),
+      });
+    }
+    if (cobrosItems.length === 0) return;
+    const batch = await postSync('POST cobros', '/cobros', accessToken, { items: cobrosItems });
     await applyCobroResults(batch.results);
     summary.cobros = cobrosItems.length;
-  }
+  });
 
+  // Enlazamos la cuenta solo si la sesión fue válida (llegamos aquí sin 401/403).
   await setPulseAccountLinked();
   return summary;
 }

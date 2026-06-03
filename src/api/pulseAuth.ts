@@ -86,6 +86,39 @@ export function normalizePulseAccessToken(token: string): string {
   return t;
 }
 
+/**
+ * Decodifica el payload (claims) de un JWT SIN validar la firma.
+ * Solo para lectura informativa en cliente (email, exp). Nunca para autorización.
+ */
+export function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  try {
+    const part = normalizePulseAccessToken(token).split('.')[1];
+    if (!part) return null;
+    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
+    const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+    const atobGlobal = globalThis.atob as ((d: string) => string) | undefined;
+    if (!atobGlobal) return null;
+    const bytes = Uint8Array.from(atobGlobal(padded), (c) => c.charCodeAt(0));
+    const json = new TextDecoder().decode(bytes);
+    const parsed = JSON.parse(json) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `true` si el JWT trae `exp` y ya venció (con margen `skewSeconds` para reloj).
+ * Si no hay `exp`, devolvemos `false` (no podemos afirmar expiración).
+ */
+export function isJwtExpired(token: string, skewSeconds = 30): boolean {
+  const payload = decodeJwtPayload(token);
+  const exp = payload && typeof payload.exp === 'number' ? payload.exp : null;
+  if (exp == null) return false;
+  const nowSec = Date.now() / 1000;
+  return nowSec >= exp - skewSeconds;
+}
+
 function extractAccessTokenFromLoginBody(body: unknown): string | null {
   if (!body || typeof body !== 'object') return null;
   const o = body as Record<string, unknown>;

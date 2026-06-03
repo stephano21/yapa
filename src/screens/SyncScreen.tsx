@@ -25,6 +25,7 @@ import type { Producto, Cliente } from '../database/db';
 import { getClientes } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
+import { isJwtExpired } from '../api/pulseAuth';
 import type { ColorPalette } from '../theme';
 import PulseAuthSection from '../components/PulseAuthSection';
 import { sincronizarPendientesConPulse } from '../api/pulseSync';
@@ -42,7 +43,7 @@ function formatFecha(iso: string): string {
 export default function SyncScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
-  const { accessToken } = useAuth();
+  const { accessToken, signOut } = useAuth();
 
   const [resumen, setResumen] = useState<ResumenPendientesSync | null>(null);
   const [productos, setProductos] = useState<Producto[]>([]);
@@ -90,6 +91,13 @@ export default function SyncScreen() {
       Alert.alert('Sincronización', 'Inicia sesión con tu cuenta Pulse para poder enviar datos al servidor.');
       return;
     }
+    // Pre-chequeo: si el JWT ya venció, cerramos sesión y pedimos re-login
+    // sin gastar una llamada que fallaría con 401.
+    if (isJwtExpired(accessToken)) {
+      void signOut();
+      Alert.alert('Sesión expirada', 'Tu sesión Pulse caducó. Inicia sesión de nuevo para sincronizar.');
+      return;
+    }
     void (async () => {
       setSincronizando(true);
       try {
@@ -106,9 +114,22 @@ export default function SyncScreen() {
         if (s.cobrosOmitidosSinClienteRemoto > 0) {
           mensaje += `\n\n${s.cobrosOmitidosSinClienteRemoto} cobro(s) no se enviaron: el cliente aún no tiene id remoto (sincroniza clientes primero o revisa datos).`;
         }
+        if (s.errores.length > 0) {
+          const detalle = s.errores.map((er) => `• ${er.entidad}: ${er.mensaje}`).join('\n');
+          mensaje += `\n\nAlgunas entidades fallaron y quedaron pendientes (se reintentan en la próxima sincronización):\n${detalle}`;
+        }
         Alert.alert('Sincronización', mensaje);
         await cargar();
       } catch (e) {
+        // 401/403: sesión inválida o expirada en servidor → cerrar sesión y pedir re-login.
+        if (e instanceof PulseAuthError && (e.status === 401 || e.status === 403)) {
+          await signOut();
+          Alert.alert(
+            'Sesión expirada',
+            'El servidor rechazó tu sesión (token inválido o caducado). Inicia sesión de nuevo. Tus datos locales siguen intactos y se sincronizarán al volver a entrar.'
+          );
+          return;
+        }
         const msg =
           e instanceof PulseAuthError
             ? e.message
@@ -120,7 +141,7 @@ export default function SyncScreen() {
         setSincronizando(false);
       }
     })();
-  }, [accessToken, cargar]);
+  }, [accessToken, cargar, signOut]);
 
   if (cargando) {
     return (

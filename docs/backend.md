@@ -6,8 +6,8 @@ Este documento describe **qué debe hacer** un servidor backend para integrarse 
 
 ## 1. Contexto de la app cliente
 
-- **Modo actual**: la app guarda todo en **SQLite local** (`yapa_pos.db`).
-- **Preparación para sync**: las tablas relevantes incluyen `remote_id`, `dirty` y marcas de tiempo donde aplica. La pantalla *Sincronización* lista registros pendientes; **aún no hay llamadas HTTP** — el backend debe implementarse y luego conectar la app a estos endpoints.
+- **Modo actual**: la app guarda todo en **SQLite local** (`yapa_pos.db`); nació offline-first y la sincronización con el servidor es voluntaria/manual.
+- **Estado de la integración**: el **push está implementado** en el cliente (`src/api/pulseSync.ts`) con `local_id` + `mutation_id` por registro y manejo de 401/expiración de sesión. La pantalla *Sincronización* dispara el envío. **Falta el pull** (descarga del servidor → dispositivo, §5.4), aún no implementado en cliente.
 - **Dominio**: punto de venta ligero — productos, clientes, ventas con detalle, cobros (cuentas por cobrar / abonos).
 
 ---
@@ -96,7 +96,20 @@ Los nombres pueden mapearse a tablas SQL en el servidor con nombres en snake_cas
 - Claims mínimos sugeridos: `sub` (usuario o dispositivo), `tenant_id` / `store_id`, `scopes` (ej. `sync:write`, `sync:read`).
 - HTTPS obligatorio en producción.
 
-*(La app deberá almacenar token de forma segura, p. ej. SecureStore, cuando implementes el cliente HTTP.)*
+### 4.1 Expiración del token — contrato con el cliente (IMPLEMENTADO)
+
+El cliente ahora **lee el claim `exp`** del JWT (sin validar firma, solo para UX) y actúa así:
+
+- **Obligatorio:** el JWT DEBE incluir el claim estándar `exp` (epoch en segundos). Sin `exp`, el cliente no puede detectar caducidad proactivamente y solo reaccionará al 401.
+- Al **hidratar la app**: si `exp` ya pasó, el cliente borra el token de SecureStore y exige re-login (no llega a llamar al API).
+- Antes de **sincronizar**: si `exp` ya pasó, corta el intento, cierra sesión local y pide re-login (ahorra un 401).
+- Ante **`401` o `403`** desde cualquier `/v1/sync/*`: el cliente cierra sesión local y pide re-login; los datos locales quedan intactos y se reintentan al volver a entrar.
+
+> El servidor DEBE devolver `401` (token inválido/caducado) o `403` (sin scope) de forma consistente en `/v1/sync/*`. No devolver `200` con cuerpo de error para sesiones inválidas.
+
+**Refresh token (recomendado, aún NO implementado en cliente):** si el backend expone `POST /v1/auth/refresh` (recibe refresh token, devuelve nuevo `access_token`), el cliente podrá renovar de forma transparente en vez de exigir re-login. Documentar el endpoint y la vida del refresh para habilitarlo. Punto de extensión en cliente: `src/api/pulseSync.ts` (interceptor de 401) y `src/context/AuthContext.tsx`.
+
+*(El cliente almacena el `access_token` en SecureStore — `src/context/AuthContext.tsx`.)*
 
 ---
 
@@ -110,7 +123,10 @@ Convenciones: JSON, `Content-Type: application/json`, códigos HTTP estándar.
 
 ### 5.2 Push — enviar cambios del dispositivo al servidor
 
-El cliente hoy puede agrupar por tipo de entidad. Cada ítem debe incluir **`local_id`** (entero SQLite) para que el servidor responda con el mapeo a `remote_id`.
+El cliente agrupa por tipo de entidad. Cada ítem incluye:
+
+- **`local_id`** (entero SQLite) para que el servidor responda con el mapeo a `remote_id`.
+- **`mutation_id`** (string estable) como clave de idempotencia por registro — **IMPLEMENTADO en el cliente**. Ver §5.3.
 
 **Productos (crear/actualizar)**
 
@@ -122,6 +138,7 @@ El cliente hoy puede agrupar por tipo de entidad. Cada ítem debe incluir **`loc
   "items": [
     {
       "local_id": 12,
+      "mutation_id": "producto:12:2025-03-25T10:00:00.000Z",
       "nombre": "Arroz 1kg",
       "precio_venta": 2.5,
       "precio_costo": 2.0,
@@ -176,17 +193,41 @@ El cliente hoy puede agrupar por tipo de entidad. Cada ítem debe incluir **`loc
 }
 ```
 
-- El servidor resuelve `producto_local_id` si ya existe mapeo previo en sesión o envías `producto_remote_id` cuando lo tengas en cliente.
+- **IMPLEMENTADO en cliente:** cada `line_item` incluye `producto_local_id` (si la línea provino del catálogo) y `producto_remote_id` (si el producto ya se sincronizó). Las ventas rápidas (monto manual) no llevan ninguno. El servidor debe vincular la línea al producto por `producto_remote_id` cuando esté presente, o por `producto_local_id` resuelto contra el mapeo de la misma tanda. Las ventas históricas (anteriores a esta versión) no traen el vínculo: se aceptan igual con `descripcion` como texto.
 - Respuesta: `local_id` → `remote_id` por venta; opcionalmente IDs de líneas.
 
 **Cobros**
 
 - `POST /v1/sync/cobros` — `local_id`, `cliente_id` (idealmente **remote** del cliente), `monto`, `fecha`.
 
-### 5.3 Idempotencia
+### 5.3 Idempotencia — `mutation_id` por registro (IMPLEMENTADO en cliente)
 
-- Opción A: cabecera `Idempotency-Key: <uuid>` por request de batch.
-- Opción B: el cliente envía `mutation_id` único por registro; el servidor guarda claves procesadas 24–72 h.
+El cliente envía un **`mutation_id` estable por registro** en cada ítem de `/v1/sync/*`. El servidor DEBE:
+
+1. Mantener una tabla de claves procesadas (`mutation_id` → `remote_id`), idealmente con `unique(tenant_id, mutation_id)` y TTL de 24–72 h.
+2. Antes de insertar, buscar el `mutation_id`. Si ya existe → **no crear duplicado**; devolver el `remote_id` previo con `status: "duplicate"`.
+3. Si no existe → procesar (crear/actualizar), persistir la clave y devolver `status: "created" | "updated"`.
+
+**Formato de la clave que envía el cliente** (ver `src/api/pulseSync.ts`):
+
+| Entidad | Patrón | Razón |
+|---------|--------|-------|
+| Producto | `producto:<local_id>:<client_updated_at ISO>` | Incluye versión: una edición legítima cambia la clave (= update); un reintento del mismo estado la reutiliza (= dedupe). |
+| Cliente | `cliente:<local_id>:<client_updated_at ISO>` | Igual que producto. |
+| Venta | `venta:<local_id>` | Append-only en el dispositivo: la venta nunca se edita tras crearse. |
+| Cobro | `cobro:<local_id>` | Append-only. |
+
+> **Por qué importa:** si la red se corta *después* de que el servidor procesó el batch pero *antes* de que el cliente recibiera la respuesta, los registros siguen `dirty=1` localmente y se reenvían en la próxima tanda. Con `mutation_id` el servidor reconoce el reenvío y responde `duplicate` en vez de crear duplicados. El `status: "duplicate"` también marca el registro como sincronizado en el cliente (`applyXResults` acepta `created|updated|duplicate`).
+
+*(Alternativa adicional, opcional: cabecera `Idempotency-Key: <uuid>` por batch. No es necesaria si respetas `mutation_id` por registro, que es robusta ante fallo parcial.)*
+
+### 5.3.1 Comportamiento de fallo parcial (cliente best-effort)
+
+La sincronización del cliente es **best-effort por entidad** (orden: productos → clientes → ventas → cobros):
+
+- Si una entidad falla por **red/servidor (no-auth)**, el cliente registra el error, **continúa con las demás** y reporta al usuario qué quedó pendiente. Lo no enviado sigue `dirty=1` y se reintenta luego (de ahí la importancia de la idempotencia).
+- Si una entidad devuelve **401/403**, el cliente **aborta toda la tanda** y cierra sesión (la sesión es inválida; las siguientes también fallarían).
+- El cliente marca cada registro como sincronizado (`dirty=0`, guarda `remote_id`) **solo** con `status` ∈ `{created, updated, duplicate}` por registro en la respuesta.
 
 ### 5.4 Pull — traer catálogo y cambios remotos al dispositivo
 
@@ -228,8 +269,10 @@ Cuando integres el cliente:
 - [ ] Esquema SQL (o documento) alineado con secciones 3 y 5.
 - [ ] Autenticación + aislamiento por `tenant_id` / tienda.
 - [ ] Endpoints push con transacciones y mapeo `local_id` → `remote_id`.
+- [ ] **Idempotencia por `mutation_id`** (tabla de claves + TTL; devolver `status: "duplicate"` con el `remote_id` previo). Ver §5.3.
+- [ ] **`exp` en el JWT** y `401/403` consistentes en `/v1/sync/*`. Ver §4.1.
+- [ ] (Opcional) `POST /v1/auth/refresh` para renovación transparente del token.
 - [ ] Endpoints pull con `updated_since` y paginación.
-- [ ] Idempotencia en escrituras.
 - [ ] Logs estructurados y trazabilidad por `request_id`.
 - [ ] Documentación OpenAPI 3.0 publicada (generada o manual).
 

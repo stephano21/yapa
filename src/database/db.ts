@@ -107,6 +107,7 @@ async function initDb(): Promise<SQLiteDatabase> {
     CREATE TABLE IF NOT EXISTS venta_detalle (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       venta_id INTEGER NOT NULL,
+      producto_id INTEGER,
       descripcion TEXT NOT NULL,
       cantidad REAL NOT NULL,
       precio_unitario REAL NOT NULL,
@@ -193,6 +194,9 @@ async function initDb(): Promise<SQLiteDatabase> {
     );
   } catch (_) {}
   try {
+    await db.execAsync('ALTER TABLE venta_detalle ADD COLUMN producto_id INTEGER');
+  } catch (_) {}
+  try {
     await db.execAsync('ALTER TABLE venta_detalle ADD COLUMN remote_id TEXT');
   } catch (_) {}
   try {
@@ -233,15 +237,16 @@ async function initDb(): Promise<SQLiteDatabase> {
     );
   } catch (_) {}
 
-  // Marcar como pendientes de sync los que no tienen remote_id (cuando exista la columna).
-  // Si algo falla, marcamos todos los registros como pendientes para que se vean en la pantalla de sincronización.
+  // Marcar como pendientes de sync solo los que aún no tienen remote_id (creados
+  // antes de existir el backend / nunca sincronizados). NO marcamos todo en el
+  // catch: eso reenviaría registros ya sincronizados y arriesgaría duplicados.
   const marcarPendientes = async (tabla: string) => {
     try {
-      await db.execAsync(`UPDATE ${tabla} SET dirty = 1 WHERE remote_id IS NULL`);
-    } catch (_) {
-      try {
-        await db.execAsync(`UPDATE ${tabla} SET dirty = 1`);
-      } catch (_) {}
+      await db.execAsync(
+        `UPDATE ${tabla} SET dirty = 1 WHERE remote_id IS NULL AND dirty = 0`
+      );
+    } catch (e) {
+      if (__DEV__) console.warn(`[DB] marcarPendientes(${tabla}) omitido:`, e);
     }
   };
   await marcarPendientes('productos');
@@ -407,10 +412,11 @@ export async function registrarVentaConDetalle(
 
   for (const it of items) {
     const subtotal = it.precio * it.cantidad;
+    const productoId = it.producto_id != null && it.producto_id > 0 ? it.producto_id : null;
     await db.runAsync(
-      `INSERT INTO venta_detalle (venta_id, descripcion, cantidad, precio_unitario, subtotal)
-       VALUES (?, ?, ?, ?, ?)`,
-      [ventaId, it.nombre, it.cantidad, it.precio, subtotal]
+      `INSERT INTO venta_detalle (venta_id, producto_id, descripcion, cantidad, precio_unitario, subtotal)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [ventaId, productoId, it.nombre, it.cantidad, it.precio, subtotal]
     );
     if (it.producto_id != null && it.producto_id > 0) {
       await db.runAsync(

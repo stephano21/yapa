@@ -196,6 +196,10 @@ export interface VentaDetalleLineaPush {
   cantidad: number;
   precio_unitario: number;
   subtotal: number;
+  /** Id local del producto (si la línea provino del catálogo; null en ventas rápidas). */
+  producto_local_id: number | null;
+  /** Id remoto del producto si ya se sincronizó (permite al servidor vincular la línea). */
+  producto_remote_id: string | null;
 }
 
 export interface VentaConDetalleParaPush {
@@ -218,23 +222,51 @@ export async function getVentasConDetalleParaPushPulse(): Promise<VentaConDetall
   } catch {
     return [];
   }
-  const out: VentaConDetalleParaPush[] = [];
-  for (const v of ventas) {
-    const lineas = await database.getAllAsync<VentaDetalleLineaPush>(
-      'SELECT descripcion, cantidad, precio_unitario, subtotal FROM venta_detalle WHERE venta_id = ? ORDER BY id',
-      [v.id]
-    );
-    out.push({
-      id: v.id,
-      fecha: v.fecha,
-      total: v.total,
-      metodo_pago: v.metodo_pago,
-      estado: v.estado,
-      cliente_id: v.cliente_id,
-      lineas,
+  if (ventas.length === 0) return [];
+
+  // Una sola query para todas las líneas (evita N+1). LEFT JOIN a productos
+  // para adjuntar el remote_id del producto cuando ya esté sincronizado.
+  const ids = ventas.map((v) => v.id);
+  const placeholders = ids.map(() => '?').join(',');
+  type LineaRow = VentaDetalleLineaPush & { venta_id: number };
+  const filas = await database.getAllAsync<LineaRow>(
+    `SELECT vd.venta_id,
+            vd.descripcion,
+            vd.cantidad,
+            vd.precio_unitario,
+            vd.subtotal,
+            vd.producto_id AS producto_local_id,
+            p.remote_id AS producto_remote_id
+     FROM venta_detalle vd
+     LEFT JOIN productos p ON p.id = vd.producto_id
+     WHERE vd.venta_id IN (${placeholders})
+     ORDER BY vd.venta_id, vd.id`,
+    ids
+  );
+
+  const porVenta = new Map<number, VentaDetalleLineaPush[]>();
+  for (const f of filas) {
+    const arr = porVenta.get(f.venta_id) ?? [];
+    arr.push({
+      descripcion: f.descripcion,
+      cantidad: f.cantidad,
+      precio_unitario: f.precio_unitario,
+      subtotal: f.subtotal,
+      producto_local_id: f.producto_local_id ?? null,
+      producto_remote_id: f.producto_remote_id ?? null,
     });
+    porVenta.set(f.venta_id, arr);
   }
-  return out;
+
+  return ventas.map((v) => ({
+    id: v.id,
+    fecha: v.fecha,
+    total: v.total,
+    metodo_pago: v.metodo_pago,
+    estado: v.estado,
+    cliente_id: v.cliente_id,
+    lineas: porVenta.get(v.id) ?? [],
+  }));
 }
 
 export async function getClienteRemoteId(clienteSqliteId: number): Promise<string | null> {
