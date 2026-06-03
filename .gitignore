@@ -8,6 +8,10 @@ node_modules/
 dist/
 web-build/
 expo-env.d.ts
+# macOS AppleDouble files (creados en volúmenes exFAT/FAT/red)
+._*
+.AppleDouble
+.LSOverride
 
 # Native
 .kotlin/
