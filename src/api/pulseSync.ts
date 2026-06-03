@@ -16,6 +16,7 @@ import {
   marcarCobroSincronizado,
   marcarLineasVentaSincronizadas,
 } from '../database/sync';
+import { setPulseAccountLinked } from '../storage/pulseLinkStorage';
 
 export type PulseSyncSummary = {
   productos: number;
@@ -279,5 +280,6 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     summary.cobros = cobrosItems.length;
   }
 
+  await setPulseAccountLinked();
   return summary;
 }
