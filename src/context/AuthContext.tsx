@@ -12,67 +12,70 @@ import {
   loginPulseUser,
   loginPulseWithGoogleIdToken,
   normalizePulseAccessToken,
+  isJwtExpired,
   PulseAuthError,
   type LoginSuccess,
 } from '../api/pulseAuth';
+import { decodeJwtEmail } from '../api/httpUtils';
+import {
+  isPulseAccountLinked,
+  setPulseAccountLinked,
+} from '../storage/pulseLinkStorage';
 
 const KEY_ACCESS = 'yapa_pulse_access_token';
 const KEY_EMAIL = 'yapa_pulse_user_email';
 
 type AuthContextValue = {
-  /** Listo tras hidratar SecureStore */
+  /** Listo tras hidratar SecureStore + pulseLinkStorage */
   ready: boolean;
   accessToken: string | null;
-  /** Correo mostrado (login manual o email del id_token de Google si se pudo leer) */
+  /** Correo mostrado (login manual o email del id_token de Google) */
   userEmail: string | null;
+  /** true si el usuario ya vinculó su cuenta Pulse en este dispositivo */
+  isPulseLinked: boolean;
   signInWithPassword: (email: string, password: string) => Promise<void>;
   signInWithGoogleIdToken: (idToken: string, emailHint?: string) => Promise<void>;
   signOut: () => Promise<void>;
   applySession: (session: LoginSuccess, emailHint?: string | null) => Promise<void>;
+  setLinked: (v: boolean) => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-function decodeJwtEmail(idToken: string): string | undefined {
-  try {
-    const part = idToken.split('.')[1];
-    if (!part) return undefined;
-    const b64 = part.replace(/-/g, '+').replace(/_/g, '/');
-    const padLen = (4 - (b64.length % 4)) % 4;
-    const padded = b64 + '='.repeat(padLen);
-    const atobGlobal = globalThis.atob as ((d: string) => string) | undefined;
-    if (!atobGlobal) return undefined;
-    const binary = atobGlobal(padded);
-    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-    const json = new TextDecoder().decode(bytes);
-    const o = JSON.parse(json) as { email?: string };
-    return typeof o.email === 'string' ? o.email : undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [isPulseLinked, setIsPulseLinked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [token, email] = await Promise.all([
+        const [token, email, linked] = await Promise.all([
           SecureStore.getItemAsync(KEY_ACCESS),
           SecureStore.getItemAsync(KEY_EMAIL),
+          isPulseAccountLinked(),
         ]);
-        if (!cancelled) {
-          setAccessToken(token ? normalizePulseAccessToken(token) : null);
+        const normalized = token ? normalizePulseAccessToken(token) : null;
+        if (normalized && isJwtExpired(normalized)) {
+          await SecureStore.deleteItemAsync(KEY_ACCESS).catch(() => {});
+          await SecureStore.deleteItemAsync(KEY_EMAIL).catch(() => {});
+          if (!cancelled) {
+            setAccessToken(null);
+            setUserEmail(null);
+            setIsPulseLinked(linked);
+          }
+        } else if (!cancelled) {
+          setAccessToken(normalized);
           setUserEmail(email);
+          setIsPulseLinked(linked);
         }
       } catch {
         if (!cancelled) {
           setAccessToken(null);
           setUserEmail(null);
+          setIsPulseLinked(false);
         }
       } finally {
         if (!cancelled) setReady(true);
@@ -97,10 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const applySession = useCallback(
     async (session: LoginSuccess, emailHint?: string | null) => {
-      const email =
-        emailHint ??
-        decodeJwtEmail(session.access_token) ??
-        null;
+      const email = emailHint ?? decodeJwtEmail(session.access_token) ?? null;
       await persistSession(session.access_token, email);
     },
     [persistSession]
@@ -126,16 +126,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(async () => {
     try {
       await SecureStore.deleteItemAsync(KEY_ACCESS);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
     try {
       await SecureStore.deleteItemAsync(KEY_EMAIL);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
     setAccessToken(null);
     setUserEmail(null);
+  }, []);
+
+  const setLinked = useCallback(async (v: boolean) => {
+    if (v) await setPulseAccountLinked();
+    setIsPulseLinked(v);
   }, []);
 
   const value = useMemo<AuthContextValue>(
@@ -143,19 +144,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ready,
       accessToken,
       userEmail,
+      isPulseLinked,
       signInWithPassword,
       signInWithGoogleIdToken,
       signOut,
       applySession,
+      setLinked,
     }),
     [
       ready,
       accessToken,
       userEmail,
+      isPulseLinked,
       signInWithPassword,
       signInWithGoogleIdToken,
       signOut,
       applySession,
+      setLinked,
     ]
   );
 

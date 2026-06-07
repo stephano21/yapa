@@ -13,26 +13,15 @@ import {
   TextInput,
 } from 'react-native';
 import { Share2, TrendingUp, DollarSign, FileText, UserPlus, X } from 'lucide-react-native';
-import {
-  getResumenHoy,
-  getResumenPorFecha,
-  getGananciaEstimadaHoy,
-  getGananciaEstimadaPorFecha,
-  getVentasDelDiaConId,
-  getVentasDelDiaConIdPorFecha,
-  getComprobantePorId,
-  getDiasConVentas,
-  getClientesConDeuda,
-  getVentasFiadasPorCliente,
-  getSaldoCliente,
-  registrarCobro,
-  setDeudaInicial,
-  addSaldoAFavor,
-} from '../database/db';
+import { ventasRepo } from '../database/repositories/ventasRepo';
+import { clientesRepo } from '../database/repositories/clientesRepo';
+import { cobrosRepo } from '../database/repositories/cobrosRepo';
+import { productosRepo } from '../database/repositories/productosRepo';
+import { calcularGananciaEstimada } from '../domain/finanzas';
 import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
 import ComprobanteModal from '../components/ComprobanteModal';
-import type { ComprobanteVenta } from '../database/db';
+import type { ComprobanteVenta } from '../database/repositories/ventasRepo';
 import { getFechaLocalYYYYMMDD } from '../utils/dateLocal';
 
 function formatHora(iso: string): string {
@@ -81,18 +70,25 @@ function agruparComprobantesPorFecha(
     .map(([fecha, comprobantesDelDia]) => ({ fecha, comprobantes: comprobantesDelDia }));
 }
 
+type ResumenBalance = {
+  totalVentas: number;
+  totalCobrado: number;
+  totalFiado: number;
+  porMetodo: Record<string, number>;
+  cantidadVentas: number;
+  gananciaEstimada: number;
+  ventasDelDia: { id: number; fecha: string; total: number; metodo_pago: string }[];
+  diasAnteriores: { fecha: string; totalVentas: number; cantidadVentas: number }[];
+  clientesConDeuda: { id: number; nombre: string; deuda: number }[];
+};
+
 export default function BalanceScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
 
-  const [totalVentas, setTotalVentas] = useState(0);
-  const [totalCobrado, setTotalCobrado] = useState(0);
-  const [totalFiado, setTotalFiado] = useState(0);
-  const [porMetodo, setPorMetodo] = useState<Record<string, number>>({});
-  const [cantidadVentas, setCantidadVentas] = useState(0);
-  const [clientesConDeuda, setClientesConDeuda] = useState<
-    { id: number; nombre: string; deuda: number }[]
-  >([]);
+  const [resumen, setResumen] = useState<ResumenBalance | null>(null);
+  const [cargando, setCargando] = useState(true);
+
   const [showCobroModal, setShowCobroModal] = useState(false);
   const [clienteParaCobro, setClienteParaCobro] = useState<{ id: number; nombre: string; deuda: number } | null>(null);
   const [montoCobro, setMontoCobro] = useState('');
@@ -109,18 +105,19 @@ export default function BalanceScreen() {
   const [montoCargaPrevia, setMontoCargaPrevia] = useState('');
   const [showAbonoFavor, setShowAbonoFavor] = useState(false);
   const [montoAbonoFavor, setMontoAbonoFavor] = useState('');
-  const [gananciaEstimada, setGananciaEstimada] = useState(0);
-  const [ventasDelDia, setVentasDelDia] = useState<
-    { id: number; fecha: string; total: number; metodo_pago: string }[]
-  >([]);
-  const [cargando, setCargando] = useState(true);
-  const [comprobanteSeleccionado, setComprobanteSeleccionado] =
-    useState<ComprobanteVenta | null>(null);
+  const [comprobanteSeleccionado, setComprobanteSeleccionado] = useState<ComprobanteVenta | null>(null);
   const [showComprobante, setShowComprobante] = useState(false);
   const [fechaSeleccionada, setFechaSeleccionada] = useState<string | null>(null);
-  const [diasAnteriores, setDiasAnteriores] = useState<
-    { fecha: string; totalVentas: number; cantidadVentas: number }[]
-  >([]);
+
+  const totalVentas = resumen?.totalVentas ?? 0;
+  const totalCobrado = resumen?.totalCobrado ?? 0;
+  const totalFiado = resumen?.totalFiado ?? 0;
+  const porMetodo = resumen?.porMetodo ?? {};
+  const cantidadVentas = resumen?.cantidadVentas ?? 0;
+  const gananciaEstimada = resumen?.gananciaEstimada ?? 0;
+  const ventasDelDia = resumen?.ventasDelDia ?? [];
+  const diasAnteriores = resumen?.diasAnteriores ?? [];
+  const clientesConDeuda = resumen?.clientesConDeuda ?? [];
 
   const esHoy = fechaSeleccionada === null;
   const fechaParaCargar = fechaSeleccionada ?? getFechaLocalYYYYMMDD();
@@ -128,29 +125,39 @@ export default function BalanceScreen() {
   const cargar = useCallback(async () => {
     setCargando(true);
     try {
-      const [resumen, ganancia, ventas, dias, deudas] = await Promise.all([
-        esHoy ? getResumenHoy() : getResumenPorFecha(fechaParaCargar),
-        esHoy ? getGananciaEstimadaHoy() : getGananciaEstimadaPorFecha(fechaParaCargar),
-        esHoy ? getVentasDelDiaConId() : getVentasDelDiaConIdPorFecha(fechaParaCargar),
-        getDiasConVentas(30),
-        getClientesConDeuda(),
+      const [resumenVentas, ventas, dias, deudas, todosProductos] = await Promise.all([
+        ventasRepo.getResumenPorFecha(fechaParaCargar),
+        ventasRepo.getDelDiaConId(esHoy ? undefined : fechaParaCargar),
+        ventasRepo.getDiasConVentas(30),
+        clientesRepo.getConBalance(),
+        productosRepo.getAll(),
       ]);
-      setTotalVentas(resumen.totalVentas);
-      setTotalCobrado(resumen.totalCobrado);
-      setTotalFiado(resumen.totalFiado);
-      setPorMetodo(resumen.porMetodo);
-      setCantidadVentas(resumen.cantidadVentas);
-      setClientesConDeuda(deudas);
-      setGananciaEstimada(ganancia);
-      setVentasDelDia(ventas);
-      setDiasAnteriores(dias);
+      const gananciaEstimada = calcularGananciaEstimada(
+        resumenVentas.totalVentas,
+        todosProductos.map((p) => ({
+          precioVenta: p.precioVenta,
+          precioCosto: p.precioCosto,
+          precioMinimo: p.precioMinimo,
+        }))
+      );
+      setResumen({
+        totalVentas: resumenVentas.totalVentas,
+        totalCobrado: resumenVentas.totalCobrado,
+        totalFiado: resumenVentas.totalFiadoPendiente,
+        porMetodo: resumenVentas.porMetodo,
+        cantidadVentas: resumenVentas.cantidadVentas,
+        gananciaEstimada,
+        ventasDelDia: ventas,
+        diasAnteriores: dias,
+        clientesConDeuda: deudas.map((d) => ({ id: d.id, nombre: d.nombre, deuda: d.balance })),
+      });
     } finally {
       setCargando(false);
     }
   }, [esHoy, fechaParaCargar]);
 
   const abrirComprobante = useCallback(async (ventaId: number) => {
-    const comp = await getComprobantePorId(ventaId);
+    const comp = await ventasRepo.getComprobantePorId(ventaId);
     if (comp) {
       setComprobanteSeleccionado(comp);
       setShowComprobante(true);
@@ -178,13 +185,13 @@ export default function BalanceScreen() {
     setComprobantesFiados([]);
     setSaldoDetalle(null);
     try {
-      const [ventas, saldo] = await Promise.all([
-        getVentasFiadasPorCliente(cliente.id),
-        getSaldoCliente(cliente.id),
+      const [ventasFiadas, saldo] = await Promise.all([
+        ventasRepo.getFiadasPorCliente(cliente.id),
+        clientesRepo.getSaldoDetalle(cliente.id),
       ]);
       setSaldoDetalle(saldo);
       const comprobantes = await Promise.all(
-        ventas.map((v) => getComprobantePorId(v.id))
+        ventasFiadas.map((v) => ventasRepo.getComprobantePorId(v.id))
       );
       setComprobantesFiados(comprobantes.filter((c): c is ComprobanteVenta => c != null));
     } finally {
@@ -208,10 +215,10 @@ export default function BalanceScreen() {
     if (!clienteDetalle) return;
     const monto = parseFloat(montoCargaPrevia.replace(',', '.'));
     if (!Number.isFinite(monto) || monto < 0) return;
-    await setDeudaInicial(clienteDetalle.id, monto);
+    await clientesRepo.setDeudaInicial(clienteDetalle.id, monto);
     setShowCargaPrevia(false);
     setMontoCargaPrevia('');
-    const saldo = await getSaldoCliente(clienteDetalle.id);
+    const saldo = await clientesRepo.getSaldoDetalle(clienteDetalle.id);
     setSaldoDetalle(saldo);
     setClienteDetalle((c) => (c ? { ...c, deuda: saldo.balance } : null));
     cargar();
@@ -221,10 +228,10 @@ export default function BalanceScreen() {
     if (!clienteDetalle) return;
     const monto = parseFloat(montoAbonoFavor.replace(',', '.'));
     if (!Number.isFinite(monto) || monto <= 0) return;
-    await addSaldoAFavor(clienteDetalle.id, monto);
+    await clientesRepo.addSaldoAFavor(clienteDetalle.id, monto);
     setShowAbonoFavor(false);
     setMontoAbonoFavor('');
-    const saldo = await getSaldoCliente(clienteDetalle.id);
+    const saldo = await clientesRepo.getSaldoDetalle(clienteDetalle.id);
     setSaldoDetalle(saldo);
     setClienteDetalle((c) => (c ? { ...c, deuda: saldo.balance } : null));
     cargar();
@@ -240,7 +247,7 @@ export default function BalanceScreen() {
     if (!clienteParaCobro) return;
     const monto = parseFloat(montoCobro.replace(',', '.'));
     if (!Number.isFinite(monto) || monto <= 0) return;
-    await registrarCobro(clienteParaCobro.id, monto);
+    await cobrosRepo.registrar(clienteParaCobro.id, monto);
     setShowCobroModal(false);
     setClienteParaCobro(null);
     setMontoCobro('');

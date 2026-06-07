@@ -15,7 +15,7 @@ import { captureRef } from 'react-native-view-shot';
 import * as Sharing from 'expo-sharing';
 import { X, Share2, Image as ImageIcon } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
-import type { ComprobanteVenta } from '../database/db';
+import type { ComprobanteVenta } from '../database/repositories/ventasRepo';
 import type { ColorPalette } from '../theme';
 
 function formatFecha(iso: string): string {
@@ -35,7 +35,7 @@ function generarTextoComprobante(c: ComprobanteVenta): string {
     'COMPROBANTE DE VENTA',
     `Nº ${String(c.id).padStart(6, '0')}`,
     `Fecha: ${formatFecha(c.fecha)}`,
-    `Método de pago: ${c.metodo_pago}`,
+    `Método de pago: ${c.metodoPago}`,
     '',
     'Descripción          Cant.   P.Unit    Subtotal',
     '----------------------------------------------',
@@ -148,7 +148,7 @@ export default function ComprobanteModal({ visible, comprobante, onCerrar }: Pro
             <Text style={styles.subtitle}>COMPROBANTE DE VENTA</Text>
             <Text style={styles.numero}>Nº {String(comprobante.id).padStart(6, '0')}</Text>
             <Text style={styles.fecha}>{formatFecha(comprobante.fecha)}</Text>
-            <Text style={styles.metodo}>Método de pago: {comprobante.metodo_pago}</Text>
+            <Text style={styles.metodo}>Método de pago: {comprobante.metodoPago}</Text>
 
             <View style={styles.table}>
               <View style={styles.tableHeader}>

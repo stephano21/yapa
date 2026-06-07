@@ -21,8 +21,8 @@ import {
   type VentaPendiente,
   type CobroPendiente,
 } from '../database/sync';
+import { clientesRepo } from '../database/repositories/clientesRepo';
 import type { Producto, Cliente } from '../database/db';
-import { getClientes } from '../database/db';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
 import type { ColorPalette } from '../theme';
@@ -62,7 +62,7 @@ export default function SyncScreen() {
         getClientesPendientesSync(),
         getVentasPendientesSync(),
         getCobrosPendientesSync(),
-        getClientes(),
+        clientesRepo.getAll(),
       ]);
       setResumen(res);
       setProductos(prods);

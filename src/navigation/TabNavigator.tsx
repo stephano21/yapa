@@ -6,8 +6,9 @@ import InventarioScreen from '../screens/InventarioScreen';
 import BalanceScreen from '../screens/BalanceScreen';
 import SyncScreen from '../screens/SyncScreen';
 import { useTheme } from '../context/ThemeContext';
+import type { TabParamList } from './types';
 
-const Tab = createBottomTabNavigator();
+const Tab = createBottomTabNavigator<TabParamList>();
 
 const ICONS: Record<string, { focused: keyof typeof Ionicons.glyphMap; unfocused: keyof typeof Ionicons.glyphMap }> = {
   Ventas: { focused: 'cart', unfocused: 'cart-outline' },

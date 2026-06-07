@@ -13,12 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Ruler, ChevronLeft } from 'lucide-react-native';
-import {
-  getUnidadesMedida,
-  crearUnidadMedida,
-  actualizarUnidadMedida,
-  type UnidadMedida,
-} from '../database/db';
+import { unidadesRepo, type UnidadMedida } from '../database/repositories/unidadesRepo';
 import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
 
@@ -37,7 +32,7 @@ export default function UnidadesMedidaScreen() {
   const cargar = useCallback(async () => {
     setCargando(true);
     try {
-      const list = await getUnidadesMedida();
+      const list = await unidadesRepo.getAll();
       setUnidades(list);
     } finally {
       setCargando(false);
@@ -63,9 +58,9 @@ export default function UnidadesMedidaScreen() {
     setGuardando(true);
     try {
       if (editandoId != null) {
-        await actualizarUnidadMedida(editandoId, n, f);
+        await unidadesRepo.actualizar(editandoId, n, f);
       } else {
-        await crearUnidadMedida(n, f);
+        await unidadesRepo.crear(n, f);
       }
       cancelarEdicion();
       await cargar();

@@ -3,3 +3,10 @@ export type RootStackParamList = {
   Main: undefined;
   UnidadesMedida: undefined;
 };
+
+export type TabParamList = {
+  Ventas: undefined;
+  Inventario: undefined;
+  Balance: undefined;
+  Sincronización: undefined;
+};

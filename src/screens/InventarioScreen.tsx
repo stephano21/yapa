@@ -14,15 +14,8 @@ import {
   Alert,
 } from 'react-native';
 import { Plus, Pencil, Ruler, Trash2, X } from 'lucide-react-native';
-import {
-  getProductos,
-  crearProducto,
-  actualizarProducto,
-  eliminarProducto,
-  getUnidadesMedida,
-  type UnidadMedida,
-  type Producto,
-} from '../database/db';
+import { productosRepo, type Producto } from '../database/repositories/productosRepo';
+import { unidadesRepo, type UnidadMedida } from '../database/repositories/unidadesRepo';
 import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
 import type { RootStackParamList } from '../navigation/types';
@@ -57,7 +50,7 @@ export default function InventarioScreen() {
   const cargar = useCallback(async () => {
     setCargando(true);
     try {
-      const [list, uoms] = await Promise.all([getProductos(), getUnidadesMedida()]);
+      const [list, uoms] = await Promise.all([productosRepo.getAll(), unidadesRepo.getAll()]);
       setProductos(list);
       setUnidadesMedida(uoms);
     } finally {
@@ -92,9 +85,9 @@ export default function InventarioScreen() {
     setMode('editar');
     setEditingId(p.id);
     setNombre(p.nombre);
-    setPrecioVenta(String(p.precio_venta));
+    setPrecioVenta(String(p.precioVenta));
     const factor = getFactor();
-    setPrecioCosto(String(p.precio_costo * factor)); // costo por unidad seleccionada
+    setPrecioCosto(String(p.precioCosto * factor)); // costo por unidad seleccionada
     setStock(String(p.stock / factor)); // stock en unidades seleccionadas
     setModalVisible(true);
   };
@@ -149,9 +142,9 @@ export default function InventarioScreen() {
     try {
       const stockEntero = stockBaseRedondeado;
       if (mode === 'crear') {
-        await crearProducto(nombreTrim, pv, pcUnitario, stockEntero);
+        await productosRepo.crear({ nombre: nombreTrim, precioVenta: pv, precioCosto: pcUnitario, stock: stockEntero });
       } else if (editingId != null) {
-        await actualizarProducto(editingId, nombreTrim, pv, pcUnitario, stockEntero);
+        await productosRepo.actualizar(editingId, { nombre: nombreTrim, precioVenta: pv, precioCosto: pcUnitario, stock: stockEntero });
       }
       setModalVisible(false);
       cargar();
@@ -170,7 +163,7 @@ export default function InventarioScreen() {
           text: 'Eliminar',
           style: 'destructive',
           onPress: async () => {
-            await eliminarProducto(p.id);
+            await productosRepo.eliminar(p.id);
             cargar();
           },
         },
@@ -185,7 +178,7 @@ export default function InventarioScreen() {
           {item.nombre}
         </Text>
         <Text style={styles.cardPrecio}>
-          Venta: ${item.precio_venta.toFixed(2)} · Costo: ${item.precio_costo.toFixed(2)}
+          Venta: ${item.precioVenta.toFixed(2)} · Costo: ${item.precioCosto.toFixed(2)}
         </Text>
         <Text style={styles.cardStock}>Stock (unidades base): {item.stock}</Text>
       </View>

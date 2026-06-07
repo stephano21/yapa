@@ -4,6 +4,7 @@ import {
   normalizePulseAccessToken,
   pulseAuthorizedHeaders,
 } from './pulseAuth';
+import { parseJsonBody } from './httpUtils';
 import {
   getProductosParaPushPulse,
   getClientesParaPushPulse,
@@ -49,16 +50,6 @@ function sqliteDateToIso(s: string): string {
   const normalized = s.includes('T') ? s : s.replace(' ', 'T');
   const d = new Date(normalized);
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
-
-async function parseJsonBody(res: Response): Promise<unknown> {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
 }
 
 function messageFromSyncErrorBody(body: unknown, fallback: string): string {

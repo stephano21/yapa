@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import TabNavigator from './TabNavigator';
@@ -7,39 +7,22 @@ import LoginScreen from '../screens/LoginScreen';
 import type { RootStackParamList } from './types';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
-import { isPulseAccountLinked } from '../storage/pulseLinkStorage';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
-  const { ready, accessToken } = useAuth();
+  const { ready, accessToken, isPulseLinked } = useAuth();
   const { colors } = useTheme();
-  const [pulseLinked, setPulseLinked] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    isPulseAccountLinked()
-      .then((v) => {
-        if (!cancelled) setPulseLinked(v);
-      })
-      .catch(() => {
-        if (!cancelled) setPulseLinked(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const cargandoGate = !ready || pulseLinked === null;
-  const requiereLogin = pulseLinked === true && !accessToken;
-
-  if (cargandoGate) {
+  if (!ready) {
     return (
       <View style={[styles.splash, { backgroundColor: colors.fondo }]}>
         <ActivityIndicator size="large" color={colors.verde} />
       </View>
     );
   }
+
+  const requiereLogin = isPulseLinked && !accessToken;
 
   return (
     <Stack.Navigator

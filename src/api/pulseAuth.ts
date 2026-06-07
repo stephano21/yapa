@@ -1,4 +1,5 @@
 import { getPulseApiBase } from '../config/pulse';
+import { parseJsonBody as parseJsonBodyUtil, decodeJwtPayload as decodeJwtPayloadUtil } from './httpUtils';
 
 export type ProblemDetails = {
   title?: string;
@@ -53,15 +54,7 @@ async function pulseAuthFetch(
   }
 }
 
-async function parseJsonBody(res: Response): Promise<unknown> {
-  const text = await res.text();
-  if (!text) return null;
-  try {
-    return JSON.parse(text) as unknown;
-  } catch {
-    return null;
-  }
-}
+const parseJsonBody = parseJsonBodyUtil;
 
 function problemFromBody(body: unknown): ProblemDetails | undefined {
   if (!body || typeof body !== 'object') return undefined;
@@ -273,6 +266,18 @@ export function pulseAuthorizedHeaders(accessToken: string | null): Record<strin
     headers.Authorization = `Bearer ${t}`;
   }
   return headers;
+}
+
+export function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  return decodeJwtPayloadUtil<Record<string, unknown>>(normalizePulseAccessToken(token));
+}
+
+export function isJwtExpired(token: string, skewSeconds = 30): boolean {
+  const payload = decodeJwtPayload(token);
+  const exp = payload && typeof payload.exp === 'number' ? payload.exp : null;
+  if (exp == null) return false;
+  const nowSec = Date.now() / 1000;
+  return nowSec >= exp - skewSeconds;
 }
 
 export async function resendPulseConfirmation(email: string): Promise<RegisterSuccess> {
