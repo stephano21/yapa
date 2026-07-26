@@ -10,24 +10,25 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
-import { Cloud, Package, Users, ShoppingCart, Banknote, Info } from 'lucide-react-native';
-import {
-  getResumenPendientesSync,
-  getProductosPendientesSync,
-  getClientesPendientesSync,
-  getVentasPendientesSync,
-  getCobrosPendientesSync,
-  type ResumenPendientesSync,
-  type VentaPendiente,
-  type CobroPendiente,
-} from '../database/sync';
-import { clientesRepo } from '../database/repositories/clientesRepo';
-import type { Producto, Cliente } from '../database/db';
+import { Cloud, Package, Users, ShoppingCart, Banknote, Ruler, Info } from 'lucide-react-native';
+import { productosRepo, type Producto } from '../database/repositories/productosRepo';
+import { clientesRepo, type Cliente } from '../database/repositories/clientesRepo';
+import { unidadesRepo, type UnidadMedida } from '../database/repositories/unidadesRepo';
+import { ventasRepo, type Venta } from '../database/repositories/ventasRepo';
+import { cobrosRepo, type Cobro } from '../database/repositories/cobrosRepo';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
 import type { ColorPalette } from '../theme';
 import PulseAuthSection from '../components/PulseAuthSection';
-import { sincronizarPendientesConPulse } from '../api/pulseSync';
+import { runSyncCycle } from '../sync/SyncOrchestrator';
+
+type ResumenPendientesSync = {
+  productos: number;
+  clientes: number;
+  unidades: number;
+  ventas: number;
+  cobros: number;
+};
 
 function formatFecha(iso: string): string {
   return new Date(iso).toLocaleString('es-EC', {
@@ -47,8 +48,9 @@ export default function SyncScreen() {
   const [resumen, setResumen] = useState<ResumenPendientesSync | null>(null);
   const [productos, setProductos] = useState<Producto[]>([]);
   const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [ventas, setVentas] = useState<VentaPendiente[]>([]);
-  const [cobros, setCobros] = useState<CobroPendiente[]>([]);
+  const [unidades, setUnidades] = useState<UnidadMedida[]>([]);
+  const [ventas, setVentas] = useState<Venta[]>([]);
+  const [cobros, setCobros] = useState<Cobro[]>([]);
   const [clientesMap, setClientesMap] = useState<Record<number, string>>({});
   const [cargando, setCargando] = useState(true);
   const [sincronizando, setSincronizando] = useState(false);
@@ -56,19 +58,26 @@ export default function SyncScreen() {
   const cargar = useCallback(async () => {
     setCargando(true);
     try {
-      const [res, prods, clis, vtas, cobs, todosClientes] = await Promise.all([
-        getResumenPendientesSync(),
-        getProductosPendientesSync(),
-        getClientesPendientesSync(),
-        getVentasPendientesSync(),
-        getCobrosPendientesSync(),
+      const [prods, clis, unis, vtas, cobs, todosClientes] = await Promise.all([
+        productosRepo.getDirty(),
+        clientesRepo.getDirty(),
+        unidadesRepo.getDirty(),
+        ventasRepo.getDirty(),
+        cobrosRepo.getDirty(),
         clientesRepo.getAll(),
       ]);
-      setResumen(res);
       setProductos(prods);
       setClientes(clis);
+      setUnidades(unis);
       setVentas(vtas);
       setCobros(cobs);
+      setResumen({
+        productos: prods.length,
+        clientes: clis.length,
+        unidades: unis.length,
+        ventas: vtas.length,
+        cobros: cobs.length,
+      });
       const map: Record<number, string> = {};
       todosClientes.forEach((c) => {
         map[c.id] = c.nombre;
@@ -93,10 +102,16 @@ export default function SyncScreen() {
     void (async () => {
       setSincronizando(true);
       try {
-        const s = await sincronizarPendientesConPulse(accessToken);
+        const result = await runSyncCycle(accessToken, { silent: false });
+        if (!result) {
+          Alert.alert('Sincronización', 'Ya hay una sincronización en curso, espera un momento.');
+          return;
+        }
+        const { push: s, pull: p } = result;
         const partes: string[] = [];
         if (s.productos) partes.push(`${s.productos} producto(s)`);
         if (s.clientes) partes.push(`${s.clientes} cliente(s)`);
+        if (s.unidades) partes.push(`${s.unidades} unidad(es) de medida`);
         if (s.ventas) partes.push(`${s.ventas} venta(s)`);
         if (s.cobros) partes.push(`${s.cobros} cobro(s)`);
         let mensaje =
@@ -105,6 +120,10 @@ export default function SyncScreen() {
             : 'No había registros pendientes de enviar.';
         if (s.cobrosOmitidosSinClienteRemoto > 0) {
           mensaje += `\n\n${s.cobrosOmitidosSinClienteRemoto} cobro(s) no se enviaron: el cliente aún no tiene id remoto (sincroniza clientes primero o revisa datos).`;
+        }
+        const recibidos = p.productos + p.clientes + p.unidades + p.ventas + p.cobros;
+        if (recibidos > 0) {
+          mensaje += `\n\nDescargado del servidor: ${recibidos} registro(s) nuevos o actualizados.`;
         }
         Alert.alert('Sincronización', mensaje);
         await cargar();
@@ -137,7 +156,7 @@ export default function SyncScreen() {
 
   const totalPendientes =
     resumen != null
-      ? resumen.productos + resumen.clientes + resumen.ventas + resumen.cobros
+      ? resumen.productos + resumen.clientes + resumen.unidades + resumen.ventas + resumen.cobros
       : 0;
 
   return (
@@ -217,7 +236,8 @@ export default function SyncScreen() {
               >
                 <Text style={styles.itemNombre} numberOfLines={1}>{p.nombre}</Text>
                 <Text style={styles.itemDetalle}>
-                  ${p.precio_venta.toFixed(2)} · Stock: {p.stock}
+                  ${p.precioVenta.toFixed(2)} · Stock: {p.stock}
+                  {p.pendingDelete ? ' · Eliminado (pendiente de confirmar)' : ''}
                 </Text>
               </View>
             ))}
@@ -237,7 +257,32 @@ export default function SyncScreen() {
                 key={c.id}
                 style={[styles.itemFila, i === clientes.length - 1 && styles.itemFilaLast]}
               >
-                <Text style={styles.itemNombre} numberOfLines={1}>{c.nombre}</Text>
+                <Text style={styles.itemNombre} numberOfLines={1}>
+                  {c.nombre}
+                  {c.pendingDelete ? ' · Eliminado (pendiente de confirmar)' : ''}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      )}
+
+      {unidades.length > 0 && (
+        <View style={styles.bloque}>
+          <View style={styles.bloqueTituloRow}>
+            <Ruler size={18} color={colors.verde} />
+            <Text style={styles.bloqueTitulo}>Unidades de medida ({unidades.length})</Text>
+          </View>
+          <View style={styles.listaCard}>
+            {unidades.map((u, i) => (
+              <View
+                key={u.id}
+                style={[styles.itemFila, i === unidades.length - 1 && styles.itemFilaLast]}
+              >
+                <Text style={styles.itemNombre} numberOfLines={1}>
+                  {u.nombre}
+                  {u.pendingDelete ? ' · Eliminado (pendiente de confirmar)' : ''}
+                </Text>
               </View>
             ))}
           </View>
@@ -256,7 +301,7 @@ export default function SyncScreen() {
                 key={v.id}
                 style={[styles.itemFila, i === ventas.length - 1 && styles.itemFilaLast]}
               >
-                <Text style={styles.itemNombre}>${v.total.toFixed(2)} · {v.metodo_pago}</Text>
+                <Text style={styles.itemNombre}>${v.total.toFixed(2)} · {v.metodoPago}</Text>
                 <Text style={styles.itemDetalle}>{formatFecha(v.fecha)}</Text>
               </View>
             ))}
@@ -277,7 +322,7 @@ export default function SyncScreen() {
                 style={[styles.itemFila, i === cobros.length - 1 && styles.itemFilaLast]}
               >
                 <Text style={styles.itemNombre}>
-                  ${c.monto.toFixed(2)} · {clientesMap[c.cliente_id] ?? `Cliente #${c.cliente_id}`}
+                  ${c.monto.toFixed(2)} · {clientesMap[c.clienteId] ?? `Cliente #${c.clienteId}`}
                 </Text>
                 <Text style={styles.itemDetalle}>{formatFecha(c.fecha)}</Text>
               </View>

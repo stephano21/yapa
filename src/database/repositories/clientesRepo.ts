@@ -1,6 +1,6 @@
 import { db } from '../drizzle/client';
 import { clientes } from '../drizzle/schema';
-import { eq, like, sql } from 'drizzle-orm';
+import { and, eq, like, sql } from 'drizzle-orm';
 
 export type Cliente = typeof clientes.$inferSelect;
 
@@ -16,11 +16,30 @@ export const clientesRepo = {
       return db
         .select()
         .from(clientes)
-        .where(like(clientes.nombre, `%${busqueda.trim()}%`))
+        .where(and(eq(clientes.pendingDelete, 0), like(clientes.nombre, `%${busqueda.trim()}%`)))
         .orderBy(clientes.nombre);
     }
-    return db.select().from(clientes).orderBy(clientes.nombre);
+    return db
+      .select()
+      .from(clientes)
+      .where(eq(clientes.pendingDelete, 0))
+      .orderBy(clientes.nombre);
   },
+
+  /** Borrado local: no se elimina la fila hasta que el servidor confirme el borrado (permite sincronizarlo). */
+  eliminar: (id: number): Promise<void> =>
+    db
+      .update(clientes)
+      .set({ pendingDelete: 1, dirty: 1, updatedAt: sql`(datetime('now'))` as unknown as string })
+      .where(eq(clientes.id, id))
+      .then(() => undefined),
+
+  /** Borra la fila de verdad; solo usar tras confirmar el borrado con el servidor. */
+  purgarLocal: (id: number): Promise<void> =>
+    db
+      .delete(clientes)
+      .where(eq(clientes.id, id))
+      .then(() => undefined),
 
   getById: (id: number): Promise<Cliente | null> =>
     db

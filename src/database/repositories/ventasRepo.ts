@@ -3,6 +3,25 @@ import { ventas, ventaDetalle, productos } from '../drizzle/schema';
 import { eq, sql, and } from 'drizzle-orm';
 import { getFechaHoraLocalParaDb, getFechaLocalYYYYMMDD } from '../../utils/dateLocal';
 
+export type VentaLineaParaPush = {
+  descripcion: string;
+  cantidad: number;
+  precioUnitario: number;
+  subtotal: number;
+  productoLocalId: number | null;
+  productoRemoteId: string | null;
+};
+
+export type VentaParaPush = {
+  id: number;
+  fecha: string;
+  total: number;
+  metodoPago: string;
+  estado: string | null;
+  clienteId: number | null;
+  lineas: VentaLineaParaPush[];
+};
+
 export type Venta = typeof ventas.$inferSelect;
 export type VentaDetalleRow = typeof ventaDetalle.$inferSelect;
 
@@ -209,6 +228,38 @@ export const ventasRepo = {
       .select()
       .from(ventaDetalle)
       .where(eq(ventaDetalle.ventaId, ventaId)),
+
+  /** Ventas pendientes de enviar a Pulse, con sus líneas y el remote_id del producto (si ya se sincronizó). */
+  getPendientesParaPush: async (): Promise<VentaParaPush[]> => {
+    const ventasRows = await db.select().from(ventas).where(eq(ventas.dirty, 1)).orderBy(ventas.id);
+    const out: VentaParaPush[] = [];
+    for (const v of ventasRows) {
+      const lineas = (await db
+        .select({
+          descripcion: ventaDetalle.descripcion,
+          cantidad: ventaDetalle.cantidad,
+          precioUnitario: ventaDetalle.precioUnitario,
+          subtotal: ventaDetalle.subtotal,
+          productoLocalId: ventaDetalle.productoId,
+          productoRemoteId: productos.remoteId,
+        })
+        .from(ventaDetalle)
+        .leftJoin(productos, eq(ventaDetalle.productoId, productos.id))
+        .where(eq(ventaDetalle.ventaId, v.id))
+        .orderBy(ventaDetalle.id)) as VentaLineaParaPush[];
+
+      out.push({
+        id: v.id,
+        fecha: v.fecha,
+        total: v.total,
+        metodoPago: v.metodoPago,
+        estado: v.estado,
+        clienteId: v.clienteId,
+        lineas,
+      });
+    }
+    return out;
+  },
 
   marcarSynced: (id: number, remoteId: string): Promise<void> =>
     db

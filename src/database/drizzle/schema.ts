@@ -11,6 +11,7 @@ export const productos = sqliteTable('productos', {
   remoteId: text('remote_id'),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
   dirty: integer('dirty').notNull().default(1),
+  pendingDelete: integer('pending_delete').notNull().default(0),
 });
 
 export const ventas = sqliteTable('ventas', {
@@ -47,6 +48,7 @@ export const clientes = sqliteTable('clientes', {
   remoteId: text('remote_id'),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
   dirty: integer('dirty').notNull().default(0),
+  pendingDelete: integer('pending_delete').notNull().default(0),
 });
 
 export const cobros = sqliteTable('cobros', {
@@ -64,6 +66,14 @@ export const unidadesMedida = sqliteTable('unidades_medida', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   nombre: text('nombre').notNull(),
   unidades: integer('unidades').notNull().default(1),
+  remoteId: text('remote_id'),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
   dirty: integer('dirty').notNull().default(0),
+  pendingDelete: integer('pending_delete').notNull().default(0),
+});
+
+export const syncState = sqliteTable('sync_state', {
+  resource: text('resource').primaryKey(),
+  lastCursor: text('last_cursor'),
+  lastPulledAt: text('last_pulled_at'),
 });

@@ -1,6 +1,6 @@
 import { db } from '../drizzle/client';
 import { productos } from '../drizzle/schema';
-import { eq, like, sql } from 'drizzle-orm';
+import { and, eq, like, sql } from 'drizzle-orm';
 
 export type Producto = typeof productos.$inferSelect;
 export type NuevoProducto = Pick<Producto, 'nombre' | 'precioVenta' | 'precioCosto' | 'stock'>;
@@ -11,10 +11,14 @@ export const productosRepo = {
       return db
         .select()
         .from(productos)
-        .where(like(productos.nombre, `%${busqueda.trim()}%`))
+        .where(and(eq(productos.pendingDelete, 0), like(productos.nombre, `%${busqueda.trim()}%`)))
         .orderBy(productos.nombre);
     }
-    return db.select().from(productos).orderBy(productos.nombre);
+    return db
+      .select()
+      .from(productos)
+      .where(eq(productos.pendingDelete, 0))
+      .orderBy(productos.nombre);
   },
 
   getById: (id: number): Promise<Producto | null> =>
@@ -38,7 +42,16 @@ export const productosRepo = {
       .where(eq(productos.id, id))
       .then(() => undefined),
 
+  /** Borrado local: no se elimina la fila hasta que el servidor confirme el borrado (permite sincronizarlo). */
   eliminar: (id: number): Promise<void> =>
+    db
+      .update(productos)
+      .set({ pendingDelete: 1, dirty: 1, updatedAt: sql`(datetime('now'))` as unknown as string })
+      .where(eq(productos.id, id))
+      .then(() => undefined),
+
+  /** Borra la fila de verdad; solo usar tras confirmar el borrado con el servidor. */
+  purgarLocal: (id: number): Promise<void> =>
     db
       .delete(productos)
       .where(eq(productos.id, id))

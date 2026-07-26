@@ -16,7 +16,10 @@
     "ios": {
       "supportsTablet": true,
       "buildNumber": "2",
-      "bundleIdentifier": "com.stynger.Yapa"
+      "bundleIdentifier": "com.stynger.Yapa",
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "Usa Face ID para desbloquear Yapa rápidamente."
+      }
     },
     "android": {
       "versionCode": 2,
@@ -35,7 +38,8 @@
       "./plugins/withLocalProperties.js",
       "./plugins/withAndroidReleaseSigning.js",
       "expo-secure-store",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-local-authentication"
     ],
     "extra": {
       "eas": {

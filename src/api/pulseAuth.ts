@@ -21,6 +21,7 @@ export class PulseAuthError extends Error {
 
 export type LoginSuccess = {
   access_token: string;
+  refresh_token: string;
   token_type: string;
   expires_in: number;
 };
@@ -79,23 +80,25 @@ export function normalizePulseAccessToken(token: string): string {
   return t;
 }
 
-function extractAccessTokenFromLoginBody(body: unknown): string | null {
+function extractTokenFromBody(body: unknown, keys: readonly string[]): string | null {
   if (!body || typeof body !== 'object') return null;
   const o = body as Record<string, unknown>;
-  const keys = ['access_token', 'accessToken', 'AccessToken', 'token', 'Token'] as const;
   for (const k of keys) {
     const v = o[k];
     if (typeof v === 'string' && v.trim()) return v;
   }
   const data = o.data;
   if (data && typeof data === 'object') {
-    return extractAccessTokenFromLoginBody(data);
+    return extractTokenFromBody(data, keys);
   }
   return null;
 }
 
+const ACCESS_TOKEN_KEYS = ['access_token', 'accessToken', 'AccessToken', 'token', 'Token'] as const;
+const REFRESH_TOKEN_KEYS = ['refresh_token', 'refreshToken', 'RefreshToken'] as const;
+
 function parseLoginSuccessBody(body: unknown): LoginSuccess {
-  const raw = extractAccessTokenFromLoginBody(body);
+  const raw = extractTokenFromBody(body, ACCESS_TOKEN_KEYS);
   if (!raw) {
     throw new PulseAuthError(
       'El servidor no devolvió access_token (revisa el JSON de login: access_token / accessToken).',
@@ -105,6 +108,13 @@ function parseLoginSuccessBody(body: unknown): LoginSuccess {
   const access_token = normalizePulseAccessToken(raw);
   if (access_token.length < 8) {
     throw new PulseAuthError('Token de acceso inválido o vacío.', 500);
+  }
+  const rawRefresh = extractTokenFromBody(body, REFRESH_TOKEN_KEYS);
+  if (!rawRefresh) {
+    throw new PulseAuthError(
+      'El servidor no devolvió refresh_token (revisa el JSON de login: refresh_token).',
+      500
+    );
   }
   const o = body as Record<string, unknown>;
   const token_type =
@@ -117,7 +127,7 @@ function parseLoginSuccessBody(body: unknown): LoginSuccess {
   } else if (typeof o.expiresIn === 'number' && Number.isFinite(o.expiresIn)) {
     expires_in = o.expiresIn;
   }
-  return { access_token, token_type, expires_in };
+  return { access_token, refresh_token: rawRefresh.trim(), token_type, expires_in };
 }
 
 async function handleAuthResponse<T>(res: Response, context: string): Promise<T> {
@@ -278,6 +288,46 @@ export function isJwtExpired(token: string, skewSeconds = 30): boolean {
   if (exp == null) return false;
   const nowSec = Date.now() / 1000;
   return nowSec >= exp - skewSeconds;
+}
+
+/** Rota el refresh token: el token presentado queda revocado (uso único) y se recibe un par nuevo. */
+export async function refreshPulseSession(refreshToken: string): Promise<LoginSuccess> {
+  const res = await pulseAuthFetch(
+    'POST /v1/auth/refresh',
+    authUrl('/refresh'),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }
+  );
+  const body = await parseJsonBody(res);
+  if (!res.ok) {
+    const problem = problemFromBody(body);
+    const msg = problem?.detail || problem?.title || res.statusText || 'No se pudo renovar la sesión';
+    throw new PulseAuthError(String(msg), res.status, problem);
+  }
+  return parseLoginSuccessBody(body);
+}
+
+/** Revoca el refresh token en el servidor. Idempotente: no lanza si el token ya era inválido. */
+export async function logoutPulseSession(refreshToken: string): Promise<void> {
+  const res = await pulseAuthFetch(
+    'POST /v1/auth/logout',
+    authUrl('/logout'),
+    {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    }
+  );
+  await parseJsonBody(res);
 }
 
 export async function resendPulseConfirmation(email: string): Promise<RegisterSuccess> {

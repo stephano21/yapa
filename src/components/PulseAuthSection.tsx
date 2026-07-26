@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Switch,
 } from 'react-native';
 import {
   GoogleSignin,
@@ -28,6 +29,8 @@ import {
   hasAnyGoogleClientIdConfigured,
   isPulseApiConfigured,
 } from '../config/pulse';
+import { isBiometricUnlockEnabled, setBiometricUnlockEnabled } from '../storage/biometricStorage';
+import { isBiometricHardwareAvailable } from '../utils/biometrics';
 import {
   ANDROID_PACKAGE_FOR_GOOGLE,
   GOOGLE_CLOUD_ANDROID_DEBUG_SHA1,
@@ -205,6 +208,55 @@ function GoogleSignInButton({ colors }: { colors: ColorPalette }) {
   );
 }
 
+function BiometricToggleRow({ colors }: { colors: ColorPalette }) {
+  const [disponible, setDisponible] = useState(false);
+  const [activo, setActivo] = useState(false);
+  const [cargando, setCargando] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([isBiometricHardwareAvailable(), isBiometricUnlockEnabled()]).then(([disp, on]) => {
+      if (!cancelled) {
+        setDisponible(disp);
+        setActivo(on);
+        setCargando(false);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (cargando || !disponible) return null;
+
+  const onToggle = (v: boolean) => {
+    setActivo(v);
+    void setBiometricUnlockEnabled(v);
+  };
+
+  return (
+    <View style={[bioStyles.row, { borderColor: colors.borde }]}>
+      <Text style={[bioStyles.label, { color: colors.texto }]}>Desbloqueo biométrico</Text>
+      <Switch value={activo} onValueChange={onToggle} />
+    </View>
+  );
+}
+
+const bioStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 14,
+    paddingTop: 14,
+    borderTopWidth: 1,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+});
+
 export default function PulseAuthSection() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
@@ -326,6 +378,7 @@ export default function PulseAuthSection() {
           Tus productos, ventas y cobros en este teléfono no se borran al cerrar sesión ni al
           iniciarla: siguen en la base local.
         </Text>
+        <BiometricToggleRow colors={colors} />
         <Pressable
           style={({ pressed }) => [
             styles.btnSecondary,
