@@ -14,6 +14,13 @@ import { ventasRepo } from '../database/repositories/ventasRepo';
 import { cobrosRepo } from '../database/repositories/cobrosRepo';
 import { setPulseAccountLinked } from '../storage/pulseLinkStorage';
 
+export type PulseSyncEntidad = 'productos' | 'clientes' | 'unidades' | 'ventas' | 'cobros';
+
+export type PulseSyncError = {
+  entidad: PulseSyncEntidad;
+  mensaje: string;
+};
+
 export type PulseSyncSummary = {
   productos: number;
   clientes: number;
@@ -21,7 +28,36 @@ export type PulseSyncSummary = {
   ventas: number;
   cobros: number;
   cobrosOmitidosSinClienteRemoto: number;
+  /** Entidades que fallaron por red/servidor (no 401/403): el resto sí se envió. */
+  errores: PulseSyncError[];
 };
+
+/** Lanza si el error es de autenticación (401/403): toda la tanda debe abortar. */
+function isAuthError(e: unknown): boolean {
+  return e instanceof PulseAuthError && (e.status === 401 || e.status === 403);
+}
+
+/**
+ * Ejecuta el push de una entidad de forma aislada: un fallo de red/servidor
+ * (no-auth) se registra en `summary.errores` y permite continuar con el resto.
+ * Un 401/403 se propaga para abortar (la sesión es inválida o expiró).
+ */
+async function pushEntidad(
+  entidad: PulseSyncEntidad,
+  summary: PulseSyncSummary,
+  fn: () => Promise<void>
+): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    if (isAuthError(e)) throw e;
+    summary.errores.push({
+      entidad,
+      mensaje: e instanceof Error ? e.message : String(e),
+    });
+    if (__DEV__) console.warn(`[PulseSync] entidad ${entidad} falló (continúa el resto):`, e);
+  }
+}
 
 type SyncResultItem = {
   local_id: number;
@@ -206,10 +242,12 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     ventas: 0,
     cobros: 0,
     cobrosOmitidosSinClienteRemoto: 0,
+    errores: [],
   };
 
-  const prods = await productosRepo.getDirty();
-  if (prods.length > 0) {
+  await pushEntidad('productos', summary, async () => {
+    const prods = await productosRepo.getDirty();
+    if (prods.length === 0) return;
     const body = {
       items: prods.map((p) => ({
         local_id: p.id,
@@ -225,10 +263,11 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     const batch = await postSync('POST productos', '/productos', accessToken, body, Crypto.randomUUID());
     await applyProductoResults(batch.results);
     summary.productos = prods.length;
-  }
+  });
 
-  const clis = await clientesRepo.getDirty();
-  if (clis.length > 0) {
+  await pushEntidad('clientes', summary, async () => {
+    const clis = await clientesRepo.getDirty();
+    if (clis.length === 0) return;
     const body = {
       items: clis.map((c) => ({
         local_id: c.id,
@@ -242,10 +281,11 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     const batch = await postSync('POST clientes', '/clientes', accessToken, body, Crypto.randomUUID());
     await applyClienteResults(batch.results);
     summary.clientes = clis.length;
-  }
+  });
 
-  const unis = await unidadesRepo.getDirty();
-  if (unis.length > 0) {
+  await pushEntidad('unidades', summary, async () => {
+    const unis = await unidadesRepo.getDirty();
+    if (unis.length === 0) return;
     const body = {
       items: unis.map((u) => ({
         local_id: u.id,
@@ -258,10 +298,11 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     const batch = await postSync('POST unidades', '/unidades', accessToken, body, Crypto.randomUUID());
     await applyUnidadResults(batch.results);
     summary.unidades = unis.length;
-  }
+  });
 
-  const ventasPendientes = await ventasRepo.getPendientesParaPush();
-  if (ventasPendientes.length > 0) {
+  await pushEntidad('ventas', summary, async () => {
+    const ventasPendientes = await ventasRepo.getPendientesParaPush();
+    if (ventasPendientes.length === 0) return;
     const items = ventasPendientes.map((v) => {
       const estado = (v.estado ?? 'cobrado') as 'cobrado' | 'fiado';
       const base: Record<string, unknown> = {
@@ -287,30 +328,30 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     const batch = await postSync('POST ventas', '/ventas', accessToken, { items }, Crypto.randomUUID());
     await applyVentaResults(batch.results);
     summary.ventas = ventasPendientes.length;
-  }
+  });
 
-  const cobrosRaw = await cobrosRepo.getDirty();
-  const cobrosItems: { local_id: number; cliente_id: string; monto: number; fecha: string }[] = [];
-  for (const c of cobrosRaw) {
-    const rid = await clientesRepo.getRemoteId(c.clienteId);
-    if (!rid) {
-      summary.cobrosOmitidosSinClienteRemoto += 1;
-      continue;
+  await pushEntidad('cobros', summary, async () => {
+    const cobrosRaw = await cobrosRepo.getDirty();
+    const cobrosItems: { local_id: number; cliente_id: string; monto: number; fecha: string }[] = [];
+    for (const c of cobrosRaw) {
+      const rid = await clientesRepo.getRemoteId(c.clienteId);
+      if (!rid) {
+        summary.cobrosOmitidosSinClienteRemoto += 1;
+        continue;
+      }
+      cobrosItems.push({
+        local_id: c.id,
+        cliente_id: rid,
+        monto: c.monto,
+        fecha: sqliteDateToIso(c.fecha),
+      });
     }
-    cobrosItems.push({
-      local_id: c.id,
-      cliente_id: rid,
-      monto: c.monto,
-      fecha: sqliteDateToIso(c.fecha),
-    });
-  }
-
-  if (cobrosItems.length > 0) {
+    if (cobrosItems.length === 0) return;
     const body = { items: cobrosItems };
     const batch = await postSync('POST cobros', '/cobros', accessToken, body, Crypto.randomUUID());
     await applyCobroResults(batch.results);
     summary.cobros = cobrosItems.length;
-  }
+  });
 
   await setPulseAccountLinked();
   return summary;

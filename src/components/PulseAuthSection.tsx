@@ -40,6 +40,11 @@ import type { ColorPalette } from '../theme';
 
 type ModoAuth = 'login' | 'registro';
 
+/** Validación básica de formato de email (UX; el servidor valida de verdad). */
+function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 /** Sign-In nativo: al menos un Client ID en .env (Web, Android, iOS o EXPO_PUBLIC_GOOGLE_CLIENT_ID). */
 function googleConfigOk(): boolean {
   if (Platform.OS === 'web') return false;
@@ -122,21 +127,11 @@ const googleStaticStyles = StyleSheet.create({
 
 function GoogleSignInButton({ colors }: { colors: ColorPalette }) {
   const { signInWithGoogleIdToken } = useAuth();
-  const env = getGoogleAuthEnv();
   const configureClientId = getGoogleSignInConfigureClientId();
   const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (Platform.OS === 'web' || !configureClientId) return;
-    GoogleSignin.configure({
-      webClientId: configureClientId,
-      ...(env.iosClientId?.trim() ? { iosClientId: env.iosClientId.trim() } : {}),
-      offlineAccess: false,
-    });
-    if (__DEV__) {
-      console.log('[Google Sign-In nativo] configure(webClientId) ←', configureClientId.slice(-30));
-    }
-  }, [configureClientId, env.iosClientId]);
+  // La configuración de Google Sign-In se hace una sola vez al iniciar la app
+  // (App.tsx → configureGoogleSignInOnce), no aquí en el render.
 
   const onPress = () => {
     void (async () => {
@@ -275,6 +270,10 @@ export default function PulseAuthSection() {
       Alert.alert('Iniciar sesión', 'Introduce correo y contraseña.');
       return;
     }
+    if (!isValidEmail(email)) {
+      Alert.alert('Iniciar sesión', 'El correo no tiene un formato válido.');
+      return;
+    }
     setEnviando(true);
     setUltimo403(false);
     try {
@@ -297,6 +296,10 @@ export default function PulseAuthSection() {
   const onRegister = useCallback(async () => {
     if (!email.trim() || !password) {
       Alert.alert('Registro', 'Introduce correo y contraseña.');
+      return;
+    }
+    if (!isValidEmail(email)) {
+      Alert.alert('Registro', 'El correo no tiene un formato válido.');
       return;
     }
     setEnviando(true);

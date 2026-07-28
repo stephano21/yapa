@@ -121,6 +121,11 @@ export default function SyncScreen() {
         if (s.cobrosOmitidosSinClienteRemoto > 0) {
           mensaje += `\n\n${s.cobrosOmitidosSinClienteRemoto} cobro(s) no se enviaron: el cliente aún no tiene id remoto (sincroniza clientes primero o revisa datos).`;
         }
+        if (s.errores.length > 0) {
+          mensaje += `\n\nAlgunas entidades no se pudieron enviar (se reintentará en la próxima sincronización):\n${s.errores
+            .map((e) => `• ${e.entidad}: ${e.mensaje}`)
+            .join('\n')}`;
+        }
         const recibidos = p.productos + p.clientes + p.unidades + p.ventas + p.cobros;
         if (recibidos > 0) {
           mensaje += `\n\nDescargado del servidor: ${recibidos} registro(s) nuevos o actualizados.`;
