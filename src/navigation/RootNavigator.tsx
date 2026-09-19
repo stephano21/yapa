@@ -16,7 +16,7 @@ import { isBiometricHardwareAvailable } from '../utils/biometrics';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
-  const { ready, accessToken, isPulseLinked, hasRefreshToken } = useAuth();
+  const { ready, accessToken, hasRefreshToken } = useAuth();
   const { colors } = useTheme();
 
   useAutoSync(accessToken);
@@ -74,7 +74,8 @@ export default function RootNavigator() {
     return <BiometricOptInScreen onDone={() => setOptInDone(true)} />;
   }
 
-  const requiereLogin = isPulseLinked && !accessToken;
+  // Login siempre requerido al abrir la app: sin sesión Pulse no se entra a Main.
+  const requiereLogin = !accessToken;
 
   return (
     <Stack.Navigator

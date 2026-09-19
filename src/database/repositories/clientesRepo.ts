@@ -93,6 +93,7 @@ export const clientesRepo = {
         FROM cobros
         GROUP BY cliente_id
       ) cb ON cb.cliente_id = c.id
+      GROUP BY c.id
       HAVING balance != 0
       ORDER BY c.nombre
     `);

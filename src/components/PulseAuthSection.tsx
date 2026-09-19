@@ -16,7 +16,7 @@ import {
   isErrorWithCode,
   isCancelledResponse,
 } from '@react-native-google-signin/google-signin';
-import { LogIn, UserPlus, LogOut } from 'lucide-react-native';
+import { LogIn, UserPlus, LogOut, Mail, Lock } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
 import {
@@ -24,18 +24,12 @@ import {
   resendPulseConfirmation,
 } from '../api/pulseAuth';
 import {
-  getGoogleAuthEnv,
   getGoogleSignInConfigureClientId,
   hasAnyGoogleClientIdConfigured,
   isPulseApiConfigured,
 } from '../config/pulse';
 import { isBiometricUnlockEnabled, setBiometricUnlockEnabled } from '../storage/biometricStorage';
 import { isBiometricHardwareAvailable } from '../utils/biometrics';
-import {
-  ANDROID_PACKAGE_FOR_GOOGLE,
-  GOOGLE_CLOUD_ANDROID_DEBUG_SHA1,
-  GOOGLE_CLOUD_ANDROID_RELEASE_SHA1,
-} from '../config/googleAndroidSigning';
 import type { ColorPalette } from '../theme';
 
 type ModoAuth = 'login' | 'registro';
@@ -45,79 +39,32 @@ function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
 
-/** Sign-In nativo: al menos un Client ID en .env (Web, Android, iOS o EXPO_PUBLIC_GOOGLE_CLIENT_ID). */
+/** Sign-In nativo: al menos un Client ID configurado (Web, Android, iOS). */
 function googleConfigOk(): boolean {
   if (Platform.OS === 'web') return false;
   return hasAnyGoogleClientIdConfigured();
 }
 
-function GoogleNativeChecklist({ colors }: { colors: ColorPalette }) {
-  if (!__DEV__ || Platform.OS === 'web') return null;
-  const env = getGoogleAuthEnv();
-  const webPreview =
-    env.webClientId && env.webClientId.length > 36
-      ? `…${env.webClientId.slice(-40)}`
-      : env.webClientId || '(falta EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID)';
-  const androidPreview =
-    env.androidClientId && env.androidClientId.length > 36
-      ? `…${env.androidClientId.slice(-40)}`
-      : env.androidClientId || '(recomendado: EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID)';
-  return (
-    <View
-      style={{
-        marginTop: 10,
-        padding: 12,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderColor: colors.borde,
-        backgroundColor: colors.fondo,
-      }}
-    >
-      <Text style={{ fontWeight: '700', color: colors.texto, marginBottom: 8, fontSize: 13 }}>
-        Google Sign-In nativo (Play Services / cuenta Google del sistema)
-      </Text>
-      <Text style={{ fontSize: 12, color: colors.textoSuave, lineHeight: 18 }}>
-        Ideal: <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID</Text> (cliente tipo{' '}
-        <Text style={{ fontWeight: '700' }}>Aplicación web</Text>; suele coincidir con la validación del
-        API). Si solo tienes cliente Android en .env, el botón igual aparece; si no hay{' '}
-        <Text style={{ fontWeight: '700' }}>id_token</Text>, añade el cliente Web.{'\n'}
-        <Text style={{ fontWeight: '600', color: colors.texto }} selectable>
-          {webPreview}
-        </Text>
-        {'\n\n'}
-        En el mismo proyecto, credencial <Text style={{ fontWeight: '700' }}>Android</Text> con package{' '}
-        <Text style={{ fontWeight: '700' }} selectable>
-          {ANDROID_PACKAGE_FOR_GOOGLE}
-        </Text>{' '}
-        y <Text style={{ fontWeight: '700' }}>ambos SHA-1</Text> (debug + release):{'\n'}
-        <Text style={{ fontWeight: '600' }} selectable>
-          {GOOGLE_CLOUD_ANDROID_DEBUG_SHA1}
-        </Text>
-        {'\n'}
-        <Text style={{ fontWeight: '600' }} selectable>
-          {GOOGLE_CLOUD_ANDROID_RELEASE_SHA1}
-        </Text>
-        {'\n'}
-        Cliente Android en .env:{' '}
-        <Text style={{ fontWeight: '600', color: colors.texto }} selectable>
-          {androidPreview}
-        </Text>
-        {'\n\n'}
-        Tras cambiar .env: <Text style={{ fontWeight: '700' }}>npx expo prebuild -p android</Text> y{' '}
-        <Text style={{ fontWeight: '700' }}>npx expo run:android</Text>. Consentimiento: si el app está
-        en pruebas, tu correo como <Text style={{ fontWeight: '700' }}>usuario de prueba</Text>.
-      </Text>
-    </View>
-  );
-}
-
 const googleStaticStyles = StyleSheet.create({
   googleBtn: {
+    flexDirection: 'row',
     borderWidth: 1,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
     justifyContent: 'center',
+    gap: 10,
+  },
+  googleBadge: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   googleBtnText: {
     fontSize: 15,
@@ -156,9 +103,7 @@ function GoogleSignInButton({ colors }: { colors: ColorPalette }) {
           idToken = tokens.idToken;
         }
         if (!idToken) {
-          throw new Error(
-            'Sin id_token. Crea un cliente tipo Web en Google Cloud y define EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID (el Android solo en .env no siempre basta). Revisa SHA-1 y package.'
-          );
+          throw new Error('No se pudo completar el inicio de sesión con Google. Intenta de nuevo.');
         }
         const emailHint = signInResult.data.user.email;
         await signInWithGoogleIdToken(idToken, emailHint);
@@ -195,9 +140,14 @@ function GoogleSignInButton({ colors }: { colors: ColorPalette }) {
       {busy ? (
         <ActivityIndicator color={colors.texto} />
       ) : (
-        <Text style={[googleStaticStyles.googleBtnText, { color: colors.texto }]}>
-          Continuar con Google
-        </Text>
+        <>
+          <View style={[googleStaticStyles.googleBadge, { backgroundColor: colors.fondo }]}>
+            <Text style={[googleStaticStyles.googleBadgeText, { color: colors.texto }]}>G</Text>
+          </View>
+          <Text style={[googleStaticStyles.googleBtnText, { color: colors.texto }]}>
+            Continuar con Google
+          </Text>
+        </>
       )}
     </Pressable>
   );
@@ -401,56 +351,56 @@ export default function PulseAuthSection() {
   return (
     <View style={[styles.card, { borderColor: colors.borde }]}>
       <Text style={[styles.cardTitle, { color: colors.texto }]}>Cuenta Pulse</Text>
-      <Text style={[styles.hintLocal, { color: colors.textoSuave, marginBottom: 12 }]}>
+      <Text style={[styles.hintLocal, { color: colors.textoSuave, marginBottom: 16 }]}>
         Puedes usar la app sin cuenta. Al iniciar sesión solo guardamos el token para la API;{' '}
         <Text style={{ fontWeight: '600' }}>no borramos tus datos locales</Text>.
       </Text>
 
-      <View style={styles.tabs}>
+      <View style={[styles.segmented, { backgroundColor: colors.fondo, borderColor: colors.borde }]}>
         <Pressable
-          style={[
-            styles.tab,
-            modo === 'login' && { ...styles.tabActiva, borderBottomColor: colors.verde },
-          ]}
+          style={[styles.segment, modo === 'login' && { backgroundColor: colors.superficie }]}
           onPress={() => setModo('login')}
         >
-          <Text style={[styles.tabText, { color: modo === 'login' ? colors.texto : colors.textoSuave }]}>
+          <Text style={[styles.segmentText, { color: modo === 'login' ? colors.texto : colors.textoSuave }]}>
             Entrar
           </Text>
         </Pressable>
         <Pressable
-          style={[
-            styles.tab,
-            modo === 'registro' && { ...styles.tabActiva, borderBottomColor: colors.verde },
-          ]}
+          style={[styles.segment, modo === 'registro' && { backgroundColor: colors.superficie }]}
           onPress={() => setModo('registro')}
         >
           <Text
-            style={[styles.tabText, { color: modo === 'registro' ? colors.texto : colors.textoSuave }]}
+            style={[styles.segmentText, { color: modo === 'registro' ? colors.texto : colors.textoSuave }]}
           >
             Registro
           </Text>
         </Pressable>
       </View>
 
-      <TextInput
-        style={[styles.input, { color: colors.texto, borderColor: colors.borde, backgroundColor: colors.superficie }]}
-        placeholder="Correo"
-        placeholderTextColor={colors.textoSuave}
-        keyboardType="email-address"
-        autoCapitalize="none"
-        autoCorrect={false}
-        value={email}
-        onChangeText={setEmail}
-      />
-      <TextInput
-        style={[styles.input, { color: colors.texto, borderColor: colors.borde, backgroundColor: colors.superficie }]}
-        placeholder="Contraseña"
-        placeholderTextColor={colors.textoSuave}
-        secureTextEntry
-        value={password}
-        onChangeText={setPassword}
-      />
+      <View style={[styles.inputRow, { borderColor: colors.borde, backgroundColor: colors.fondo }]}>
+        <Mail size={18} color={colors.textoSuave} />
+        <TextInput
+          style={[styles.inputField, { color: colors.texto }]}
+          placeholder="Correo"
+          placeholderTextColor={colors.textoSuave}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          value={email}
+          onChangeText={setEmail}
+        />
+      </View>
+      <View style={[styles.inputRow, { borderColor: colors.borde, backgroundColor: colors.fondo }]}>
+        <Lock size={18} color={colors.textoSuave} />
+        <TextInput
+          style={[styles.inputField, { color: colors.texto }]}
+          placeholder="Contraseña"
+          placeholderTextColor={colors.textoSuave}
+          secureTextEntry
+          value={password}
+          onChangeText={setPassword}
+        />
+      </View>
 
       {modo === 'login' ? (
         <Pressable
@@ -496,7 +446,7 @@ export default function PulseAuthSection() {
         </Pressable>
       )}
 
-      {googleConfigOk() ? (
+      {googleConfigOk() && (
         <View style={styles.googleWrap}>
           <View style={styles.dividerRow}>
             <View style={[styles.divider, { backgroundColor: colors.borde }]} />
@@ -504,24 +454,7 @@ export default function PulseAuthSection() {
             <View style={[styles.divider, { backgroundColor: colors.borde }]} />
           </View>
           <GoogleSignInButton colors={colors} />
-          <GoogleNativeChecklist colors={colors} />
-          {__DEV__ ? (
-            <Text style={[styles.googleHint, { color: colors.textoSuave, marginTop: 8 }]}>
-              No usa navegador: SDK nativo. Tras cambiar variables Google en .env,{' '}
-              <Text style={{ fontWeight: '700' }}>npx expo prebuild</Text> y{' '}
-              <Text style={{ fontWeight: '700' }}>npx expo run:android</Text>.
-            </Text>
-          ) : null}
         </View>
-      ) : (
-        __DEV__ ? (
-          <Text style={[styles.googleHint, { color: colors.textoSuave, marginTop: 8 }]}>
-            En móvil: define <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID</Text>,{' '}
-            <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID</Text> o{' '}
-            <Text style={{ fontWeight: '700' }}>EXPO_PUBLIC_GOOGLE_CLIENT_ID</Text> y reinicia Metro (
-            <Text style={{ fontWeight: '700' }}>npx expo start -c</Text>).
-          </Text>
-        ) : null
       )}
     </View>
   );
@@ -562,32 +495,36 @@ function createStyles(colors: ColorPalette) {
       fontSize: 14,
       marginTop: 2,
     },
-    tabs: {
+    segmented: {
       flexDirection: 'row',
-      marginBottom: 12,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.borde,
+      borderRadius: 12,
+      borderWidth: 1,
+      padding: 4,
+      marginBottom: 16,
     },
-    tab: {
+    segment: {
       flex: 1,
-      paddingVertical: 10,
+      paddingVertical: 9,
+      borderRadius: 9,
       alignItems: 'center',
     },
-    tabActiva: {
-      borderBottomWidth: 2,
-      marginBottom: -1,
-    },
-    tabText: {
-      fontSize: 15,
+    segmentText: {
+      fontSize: 14,
       fontWeight: '600',
     },
-    input: {
+    inputRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
       borderWidth: 1,
-      borderRadius: 10,
-      paddingHorizontal: 12,
-      paddingVertical: 10,
-      fontSize: 15,
+      borderRadius: 12,
+      paddingHorizontal: 14,
       marginBottom: 10,
+    },
+    inputField: {
+      flex: 1,
+      paddingVertical: 12,
+      fontSize: 15,
     },
     btnPrimary: {
       flexDirection: 'row',
@@ -639,11 +576,6 @@ function createStyles(colors: ColorPalette) {
     dividerText: {
       paddingHorizontal: 12,
       fontSize: 13,
-    },
-    googleHint: {
-      fontSize: 11,
-      lineHeight: 16,
-      marginTop: 8,
     },
   });
 }

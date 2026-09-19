@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { LogIn } from 'lucide-react-native';
+import { Store } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
 import PulseAuthSection from '../components/PulseAuthSection';
@@ -20,11 +20,13 @@ export default function LoginScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.header}>
-          <LogIn size={28} color={colors.verde} />
-          <Text style={styles.titulo}>Iniciar sesión</Text>
+          <View style={[styles.badge, { backgroundColor: colors.verde }]}>
+            <Store size={30} color={colors.onPrimario} />
+          </View>
+          <Text style={styles.titulo}>Bienvenido a Yapa</Text>
           <Text style={styles.subtitulo}>
-            Tu cuenta ya está vinculada con Pulse. Inicia sesión para continuar y sincronizar con el
-            servidor.
+            Inicia sesión con tu cuenta para continuar. Si aún no tienes una, puedes crearla desde
+            aquí mismo.
           </Text>
         </View>
         {!ready ? (
@@ -47,23 +49,36 @@ function createStyles(colors: ColorPalette) {
       flex: 1,
     },
     scrollContent: {
+      flexGrow: 1,
+      justifyContent: 'center',
       paddingHorizontal: 20,
-      paddingBottom: 32,
+      paddingVertical: 32,
     },
     header: {
-      marginBottom: 20,
+      alignItems: 'center',
+      marginBottom: 28,
+    },
+    badge: {
+      width: 64,
+      height: 64,
+      borderRadius: 32,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: 16,
     },
     titulo: {
       fontSize: 24,
       fontWeight: '700',
       color: colors.texto,
-      marginTop: 12,
+      textAlign: 'center',
     },
     subtitulo: {
       fontSize: 15,
       color: colors.textoSuave,
       marginTop: 8,
       lineHeight: 22,
+      textAlign: 'center',
+      paddingHorizontal: 8,
     },
     loader: {
       marginTop: 24,

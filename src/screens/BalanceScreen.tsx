@@ -6,6 +6,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Alert,
   Share,
   ScrollView,
   Modal,
@@ -151,6 +152,9 @@ export default function BalanceScreen() {
         diasAnteriores: dias,
         clientesConDeuda: deudas.map((d) => ({ id: d.id, nombre: d.nombre, deuda: d.balance })),
       });
+    } catch (e) {
+      console.warn('[BalanceScreen] cargar', e);
+      Alert.alert('Balance', 'No se pudo cargar el balance. Intenta de nuevo.');
     } finally {
       setCargando(false);
     }
