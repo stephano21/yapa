@@ -16,10 +16,10 @@ import { isBiometricHardwareAvailable } from '../utils/biometrics';
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 export default function RootNavigator() {
-  const { ready, accessToken, hasRefreshToken } = useAuth();
+  const { ready, accessToken, hasRefreshToken, ensureFreshAccessToken } = useAuth();
   const { colors } = useTheme();
 
-  useAutoSync(accessToken);
+  useAutoSync(!!accessToken, ensureFreshAccessToken);
 
   const [biometricEnabled, setBiometricEnabled] = useState(false);
   const [biometricAvailable, setBiometricAvailable] = useState(false);

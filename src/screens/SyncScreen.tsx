@@ -214,9 +214,10 @@ export default function SyncScreen() {
         <View style={styles.cardCuandoTexto}>
           <Text style={styles.cardCuandoTitulo}>¿Cuándo se sincronizan?</Text>
           <Text style={styles.cardCuandoCuerpo}>
-            Con sesión iniciada, pulsa «Sincronizar con Pulse» para enviar productos, clientes, ventas
-            y cobros pendientes al API (orden recomendado por el servidor). Los datos siguen en el
-            teléfono; el servidor guarda copia y te devuelve ids remotos.
+            Con sesión iniciada y conexión, la app sincroniza sola: al abrirla, al recuperar internet,
+            poco después de guardar cambios y cada pocos minutos. Sin conexión todo se guarda en el
+            teléfono y se envía al reconectar. El botón «Sincronizar con Pulse» fuerza una
+            sincronización inmediata y te muestra el resultado.
           </Text>
         </View>
       </View>

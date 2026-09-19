@@ -1,7 +1,25 @@
 import { sincronizarPendientesConPulse, type PulseSyncSummary } from '../api/pulseSync';
 import { pullCatalogoDeSpulse, type PullSummary } from '../api/pulseCatalogPull';
 
+import { productosRepo } from '../database/repositories/productosRepo';
+import { clientesRepo } from '../database/repositories/clientesRepo';
+import { unidadesRepo } from '../database/repositories/unidadesRepo';
+import { ventasRepo } from '../database/repositories/ventasRepo';
+import { cobrosRepo } from '../database/repositories/cobrosRepo';
+
 let inFlight = false;
+
+/** true si hay al menos un registro local marcado como dirty (pendiente de enviar a Pulse). */
+export async function hasPendingChanges(): Promise<boolean> {
+  const pendientes = await Promise.all([
+    productosRepo.getDirty(),
+    clientesRepo.getDirty(),
+    unidadesRepo.getDirty(),
+    ventasRepo.getDirty(),
+    cobrosRepo.getDirty(),
+  ]);
+  return pendientes.some((lista) => lista.length > 0);
+}
 
 export type RunSyncCycleOptions = {
   /** true: swallow y loguea errores (ciclo automático en segundo plano). false: relanza (botón manual). */
