@@ -160,7 +160,8 @@ async function handleAuthResponse<T>(res: Response, context: string): Promise<T>
 
 export async function registerPulseUser(
   email: string,
-  password: string
+  password: string,
+  tenantName: string
 ): Promise<RegisterSuccess> {
   const res = await pulseAuthFetch(
     'POST /v1/auth/register',
@@ -171,7 +172,7 @@ export async function registerPulseUser(
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, tenant_name: tenantName }),
     }
   );
   return handleAuthResponse<RegisterSuccess>(res, 'register');

@@ -16,7 +16,7 @@ import {
   isErrorWithCode,
   isCancelledResponse,
 } from '@react-native-google-signin/google-signin';
-import { LogIn, UserPlus, LogOut, Mail, Lock } from 'lucide-react-native';
+import { LogIn, UserPlus, LogOut, Mail, Lock, Store } from 'lucide-react-native';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
 import {
@@ -210,6 +210,7 @@ export default function PulseAuthSection() {
   const [modo, setModo] = useState<ModoAuth>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [tenantName, setTenantName] = useState('');
   const [enviando, setEnviando] = useState(false);
   const [ultimo403, setUltimo403] = useState(false);
 
@@ -252,9 +253,13 @@ export default function PulseAuthSection() {
       Alert.alert('Registro', 'El correo no tiene un formato válido.');
       return;
     }
+    if (!tenantName.trim()) {
+      Alert.alert('Registro', 'Introduce el nombre de tu negocio.');
+      return;
+    }
     setEnviando(true);
     try {
-      const res = await registerPulseUser(email.trim(), password);
+      const res = await registerPulseUser(email.trim(), password, tenantName.trim());
       Alert.alert('Registro', res.message);
       setModo('login');
     } catch (e) {
@@ -267,7 +272,7 @@ export default function PulseAuthSection() {
     } finally {
       setEnviando(false);
     }
-  }, [email, password]);
+  }, [email, password, tenantName]);
 
   const onResend = useCallback(async () => {
     if (!email.trim()) {
@@ -377,6 +382,19 @@ export default function PulseAuthSection() {
         </Pressable>
       </View>
 
+      {modo === 'registro' && (
+        <View style={[styles.inputRow, { borderColor: colors.borde, backgroundColor: colors.fondo }]}>
+          <Store size={18} color={colors.textoSuave} />
+          <TextInput
+            style={[styles.inputField, { color: colors.texto }]}
+            placeholder="Nombre de tu negocio"
+            placeholderTextColor={colors.textoSuave}
+            autoCapitalize="words"
+            value={tenantName}
+            onChangeText={setTenantName}
+          />
+        </View>
+      )}
       <View style={[styles.inputRow, { borderColor: colors.borde, backgroundColor: colors.fondo }]}>
         <Mail size={18} color={colors.textoSuave} />
         <TextInput
