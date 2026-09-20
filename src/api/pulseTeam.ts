@@ -11,6 +11,15 @@ export type TeamUser = {
   created_at: string;
 };
 
+export type Tenant = {
+  id: string;
+  name: string;
+  created_at: string;
+  user_count: number;
+  notification_email: string | null;
+  logo_url: string | null;
+};
+
 function teamUrl(path: string): string {
   const base = getPulseApiBase();
   if (!base) {
@@ -75,4 +84,18 @@ export async function createTeamUser(
     body: JSON.stringify({ email, password }),
   });
   return body as TeamUser;
+}
+
+export async function getTenant(accessToken: string): Promise<Tenant> {
+  const body = await teamFetch('GET /v1/team/tenant', '/tenant', accessToken, { method: 'GET' });
+  return body as Tenant;
+}
+
+/** Subí el archivo primero con uploadFile() (pulseFiles.ts) y pasá acá el id que devuelve. */
+export async function setTenantLogo(accessToken: string, fileId: string): Promise<Tenant> {
+  const body = await teamFetch('PUT /v1/team/tenant/logo', '/tenant/logo', accessToken, {
+    method: 'PUT',
+    body: JSON.stringify({ file_id: fileId }),
+  });
+  return body as Tenant;
 }

@@ -20,6 +20,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
 import type { ColorPalette } from '../theme';
 import PulseAuthSection from '../components/PulseAuthSection';
+import PerfilSection from '../components/PerfilSection';
 import EquipoSection from '../components/EquipoSection';
 import { runSyncCycle } from '../sync/SyncOrchestrator';
 
@@ -187,6 +188,7 @@ export default function SyncScreen() {
       </View>
 
       <PulseAuthSection />
+      <PerfilSection />
       <EquipoSection />
 
       <Pressable
