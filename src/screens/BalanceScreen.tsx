@@ -533,38 +533,43 @@ export default function BalanceScreen() {
             </View>
             {clienteDetalle && (
               <>
-                <Text style={styles.modalCobroCliente}>{clienteDetalle.nombre}</Text>
-                {saldoDetalle && (
-                  <>
-                    {saldoDetalle.deuda_inicial > 0 && (
-                      <Text style={styles.modalDetalleDeudaInicial}>Deuda inicial (antes del app): ${saldoDetalle.deuda_inicial.toFixed(2)}</Text>
-                    )}
-                    {saldoDetalle.saldo_a_favor > 0 && (
-                      <Text style={styles.modalDetalleSaldoFavor}>Saldo a favor: ${saldoDetalle.saldo_a_favor.toFixed(2)}</Text>
-                    )}
-                  </>
-                )}
-                <Text style={styles.modalDetalleDeuda}>
-                  {clienteDetalle.deuda > 0
-                    ? `Deuda total: $${clienteDetalle.deuda.toFixed(2)}`
-                    : clienteDetalle.deuda < 0
-                      ? `Saldo a favor: $${Math.abs(clienteDetalle.deuda).toFixed(2)}`
-                      : 'Al día'}
-                </Text>
-                <View style={styles.detalleAccionesCuenta}>
-                  <TouchableOpacity style={styles.detalleBtnSecundario} onPress={() => { setMontoCargaPrevia(''); setShowCargaPrevia(true); }}>
-                    <Text style={styles.detalleBtnSecundarioTexto}>Cargar cuenta previa</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={styles.detalleBtnSecundario} onPress={() => { setMontoAbonoFavor(''); setShowAbonoFavor(true); }}>
-                    <Text style={styles.detalleBtnSecundarioTexto}>Abonar a favor</Text>
-                  </TouchableOpacity>
-                </View>
-                <Text style={styles.modalDetalleSubtitulo}>Comprobantes fiados (detalle de facturas)</Text>
-                {cargandoDetalle ? (
-                  <ActivityIndicator size="small" color={colors.verde} style={styles.detalleLoader} />
-                ) : (
-                  <ScrollView style={styles.modalDetalleLista} showsVerticalScrollIndicator={false}>
-                    {agruparComprobantesPorFecha(comprobantesFiados).map(({ fecha, comprobantes: compsDelDia }) => (
+                <ScrollView
+                  style={styles.modalDetalleScroll}
+                  contentContainerStyle={styles.modalDetalleScrollContent}
+                  nestedScrollEnabled
+                  showsVerticalScrollIndicator
+                >
+                  <Text style={styles.modalCobroCliente}>{clienteDetalle.nombre}</Text>
+                  {saldoDetalle && (
+                    <>
+                      {saldoDetalle.deuda_inicial > 0 && (
+                        <Text style={styles.modalDetalleDeudaInicial}>Deuda inicial (antes del app): ${saldoDetalle.deuda_inicial.toFixed(2)}</Text>
+                      )}
+                      {saldoDetalle.saldo_a_favor > 0 && (
+                        <Text style={styles.modalDetalleSaldoFavor}>Saldo a favor: ${saldoDetalle.saldo_a_favor.toFixed(2)}</Text>
+                      )}
+                    </>
+                  )}
+                  <Text style={styles.modalDetalleDeuda}>
+                    {clienteDetalle.deuda > 0
+                      ? `Deuda total: $${clienteDetalle.deuda.toFixed(2)}`
+                      : clienteDetalle.deuda < 0
+                        ? `Saldo a favor: $${Math.abs(clienteDetalle.deuda).toFixed(2)}`
+                        : 'Al día'}
+                  </Text>
+                  <View style={styles.detalleAccionesCuenta}>
+                    <TouchableOpacity style={styles.detalleBtnSecundario} onPress={() => { setMontoCargaPrevia(''); setShowCargaPrevia(true); }}>
+                      <Text style={styles.detalleBtnSecundarioTexto}>Cargar cuenta previa</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.detalleBtnSecundario} onPress={() => { setMontoAbonoFavor(''); setShowAbonoFavor(true); }}>
+                      <Text style={styles.detalleBtnSecundarioTexto}>Abonar a favor</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.modalDetalleSubtitulo}>Comprobantes fiados (detalle de facturas)</Text>
+                  {cargandoDetalle ? (
+                    <ActivityIndicator size="small" color={colors.verde} style={styles.detalleLoader} />
+                  ) : (
+                    agruparComprobantesPorFecha(comprobantesFiados).map(({ fecha, comprobantes: compsDelDia }) => (
                       <View key={fecha} style={styles.detalleGrupoFecha}>
                         <Text style={styles.detalleFechaHeader}>{formatFechaCompleta(fecha + 'T12:00:00')}</Text>
                         {compsDelDia.map((comp) => (
@@ -587,11 +592,11 @@ export default function BalanceScreen() {
                           </View>
                         ))}
                       </View>
-                    ))}
-                  </ScrollView>
-                )}
+                    ))
+                  )}
+                </ScrollView>
                 {clienteDetalle.deuda > 0 && (
-                  <TouchableOpacity style={styles.modalCobroBtn} onPress={abrirCobroDesdeDetalle}>
+                  <TouchableOpacity style={[styles.modalCobroBtn, styles.modalDetalleBtnCobro]} onPress={abrirCobroDesdeDetalle}>
                     <Text style={styles.modalCobroBtnTexto}>Registrar cobro</Text>
                   </TouchableOpacity>
                 )}
@@ -975,7 +980,7 @@ function createStyles(colors: ColorPalette) {
     padding: 20,
     borderWidth: 1,
     borderColor: colors.borde,
-    maxHeight: '80%',
+    maxHeight: '85%',
   },
   modalDetalleDeuda: {
     fontSize: 18,
@@ -1018,9 +1023,14 @@ function createStyles(colors: ColorPalette) {
     color: colors.textoSuave,
     marginBottom: 10,
   },
-  modalDetalleLista: {
-    maxHeight: 220,
-    marginBottom: 16,
+  modalDetalleScroll: {
+    flexShrink: 1,
+  },
+  modalDetalleScrollContent: {
+    paddingBottom: 4,
+  },
+  modalDetalleBtnCobro: {
+    marginTop: 14,
   },
   detalleGrupoFecha: {
     marginBottom: 16,
