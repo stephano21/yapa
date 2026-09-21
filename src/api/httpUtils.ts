@@ -28,3 +28,8 @@ export function decodeJwtEmail(token: string): string | undefined {
   const payload = decodeJwtPayload<{ email?: string }>(token);
   return typeof payload?.email === 'string' ? payload.email : undefined;
 }
+
+export function decodeJwtTenantId(token: string): string | undefined {
+  const payload = decodeJwtPayload<{ tenant_id?: string }>(token);
+  return typeof payload?.tenant_id === 'string' ? payload.tenant_id : undefined;
+}
