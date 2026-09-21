@@ -19,7 +19,7 @@
       "bundleIdentifier": "com.stynger.Yapa",
       "infoPlist": {
         "NSFaceIDUsageDescription": "Usa Face ID para desbloquear Yapa rápidamente.",
-        "NSPhotoLibraryUsageDescription": "Yapa necesita acceso a tus fotos para que puedas elegir el logo de tu negocio o tu foto de perfil."
+        "NSPhotoLibraryUsageDescription": "Yapa necesita acceso a tus fotos para que puedas elegir el logo de tu negocio, tu foto de perfil o el comprobante de un pago a proveedor."
       }
     },
     "android": {
@@ -44,7 +44,7 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Yapa necesita acceso a tus fotos para que puedas elegir el logo de tu negocio o tu foto de perfil."
+          "photosPermission": "Yapa necesita acceso a tus fotos para que puedas elegir el logo de tu negocio, tu foto de perfil o el comprobante de un pago a proveedor."
         }
       ]
     ],

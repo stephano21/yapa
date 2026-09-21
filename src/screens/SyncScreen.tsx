@@ -16,6 +16,9 @@ import { clientesRepo, type Cliente } from '../database/repositories/clientesRep
 import { unidadesRepo, type UnidadMedida } from '../database/repositories/unidadesRepo';
 import { ventasRepo, type Venta } from '../database/repositories/ventasRepo';
 import { cobrosRepo, type Cobro } from '../database/repositories/cobrosRepo';
+import { proveedoresRepo } from '../database/repositories/proveedoresRepo';
+import { comprasProveedorRepo } from '../database/repositories/comprasProveedorRepo';
+import { pagosProveedorRepo } from '../database/repositories/pagosProveedorRepo';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth, PulseAuthError } from '../context/AuthContext';
 import type { ColorPalette } from '../theme';
@@ -30,6 +33,8 @@ type ResumenPendientesSync = {
   unidades: number;
   ventas: number;
   cobros: number;
+  /** Proveedores + compras a crédito + pagos a proveedores pendientes de enviar. */
+  proveedores: number;
 };
 
 function formatFecha(iso: string): string {
@@ -60,13 +65,16 @@ export default function SyncScreen() {
   const cargar = useCallback(async () => {
     setCargando(true);
     try {
-      const [prods, clis, unis, vtas, cobs, todosClientes] = await Promise.all([
+      const [prods, clis, unis, vtas, cobs, todosClientes, provs, compras, pagos] = await Promise.all([
         productosRepo.getDirty(),
         clientesRepo.getDirty(),
         unidadesRepo.getDirty(),
         ventasRepo.getDirty(),
         cobrosRepo.getDirty(),
         clientesRepo.getAll(),
+        proveedoresRepo.getDirty(),
+        comprasProveedorRepo.getDirty(),
+        pagosProveedorRepo.getDirty(),
       ]);
       setProductos(prods);
       setClientes(clis);
@@ -79,6 +87,7 @@ export default function SyncScreen() {
         unidades: unis.length,
         ventas: vtas.length,
         cobros: cobs.length,
+        proveedores: provs.length + compras.length + pagos.length,
       });
       const map: Record<number, string> = {};
       todosClientes.forEach((c) => {
@@ -116,6 +125,9 @@ export default function SyncScreen() {
         if (s.unidades) partes.push(`${s.unidades} unidad(es) de medida`);
         if (s.ventas) partes.push(`${s.ventas} venta(s)`);
         if (s.cobros) partes.push(`${s.cobros} cobro(s)`);
+        if (s.proveedores) partes.push(`${s.proveedores} proveedor(es)`);
+        if (s.comprasProveedor) partes.push(`${s.comprasProveedor} compra(s) a proveedores`);
+        if (s.pagosProveedor) partes.push(`${s.pagosProveedor} pago(s) a proveedores`);
         let mensaje =
           partes.length > 0
             ? `Enviado al servidor: ${partes.join(', ')}.`
@@ -123,12 +135,16 @@ export default function SyncScreen() {
         if (s.cobrosOmitidosSinClienteRemoto > 0) {
           mensaje += `\n\n${s.cobrosOmitidosSinClienteRemoto} cobro(s) no se enviaron: el cliente aún no tiene id remoto (sincroniza clientes primero o revisa datos).`;
         }
+        if (s.movimientosProveedorOmitidosSinProveedorRemoto > 0) {
+          mensaje += `\n\n${s.movimientosProveedorOmitidosSinProveedorRemoto} compra(s)/pago(s) a proveedores esperan a que su proveedor termine de sincronizarse (se envían en el próximo ciclo).`;
+        }
         if (s.errores.length > 0) {
           mensaje += `\n\nAlgunas entidades no se pudieron enviar (se reintentará en la próxima sincronización):\n${s.errores
             .map((e) => `• ${e.entidad}: ${e.mensaje}`)
             .join('\n')}`;
         }
-        const recibidos = p.productos + p.clientes + p.unidades + p.ventas + p.cobros;
+        const recibidos =
+          p.productos + p.clientes + p.unidades + p.ventas + p.cobros + p.proveedores + p.comprasProveedor + p.pagosProveedor;
         if (recibidos > 0) {
           mensaje += `\n\nDescargado del servidor: ${recibidos} registro(s) nuevos o actualizados.`;
         }
@@ -163,7 +179,7 @@ export default function SyncScreen() {
 
   const totalPendientes =
     resumen != null
-      ? resumen.productos + resumen.clientes + resumen.unidades + resumen.ventas + resumen.cobros
+      ? resumen.productos + resumen.clientes + resumen.unidades + resumen.ventas + resumen.cobros + resumen.proveedores
       : 0;
 
   return (

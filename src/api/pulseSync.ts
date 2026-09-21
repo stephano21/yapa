@@ -12,9 +12,21 @@ import { clientesRepo } from '../database/repositories/clientesRepo';
 import { unidadesRepo } from '../database/repositories/unidadesRepo';
 import { ventasRepo } from '../database/repositories/ventasRepo';
 import { cobrosRepo } from '../database/repositories/cobrosRepo';
+import { proveedoresRepo } from '../database/repositories/proveedoresRepo';
+import { comprasProveedorRepo } from '../database/repositories/comprasProveedorRepo';
+import { pagosProveedorRepo } from '../database/repositories/pagosProveedorRepo';
+import { uploadFile, mimeTypeFromUri } from './pulseFiles';
 import { setPulseAccountLinked } from '../storage/pulseLinkStorage';
 
-export type PulseSyncEntidad = 'productos' | 'clientes' | 'unidades' | 'ventas' | 'cobros';
+export type PulseSyncEntidad =
+  | 'productos'
+  | 'clientes'
+  | 'unidades'
+  | 'ventas'
+  | 'cobros'
+  | 'proveedores'
+  | 'comprasProveedor'
+  | 'pagosProveedor';
 
 export type PulseSyncError = {
   entidad: PulseSyncEntidad;
@@ -28,6 +40,11 @@ export type PulseSyncSummary = {
   ventas: number;
   cobros: number;
   cobrosOmitidosSinClienteRemoto: number;
+  proveedores: number;
+  comprasProveedor: number;
+  pagosProveedor: number;
+  /** Compras/pagos a proveedores que esperan a que su proveedor tenga id remoto (se envían en el próximo ciclo). */
+  movimientosProveedorOmitidosSinProveedorRemoto: number;
   /** Entidades que fallaron por red/servidor (no 401/403): el resto sí se envió. */
   errores: PulseSyncError[];
 };
@@ -229,6 +246,44 @@ async function applyCobroResults(results: SyncResultItem[]): Promise<void> {
   }
 }
 
+async function applyProveedorResults(results: SyncResultItem[]): Promise<void> {
+  for (const r of results) {
+    if (r.status === 'deleted') {
+      await proveedoresRepo.purgarLocal(r.local_id);
+      continue;
+    }
+    if (r.remote_id && ['created', 'updated', 'duplicate'].includes(r.status)) {
+      await proveedoresRepo.marcarSynced(r.local_id, r.remote_id);
+    }
+  }
+}
+
+async function applyCompraProveedorResults(results: SyncResultItem[]): Promise<void> {
+  for (const r of results) {
+    if (r.remote_id && ['created', 'duplicate'].includes(r.status)) {
+      await comprasProveedorRepo.marcarSynced(r.local_id, r.remote_id);
+    }
+  }
+}
+
+async function applyPagoProveedorResults(results: SyncResultItem[]): Promise<void> {
+  for (const r of results) {
+    if (r.remote_id && ['created', 'duplicate'].includes(r.status)) {
+      await pagosProveedorRepo.marcarSynced(r.local_id, r.remote_id);
+    }
+  }
+}
+
+/** La foto elegida vive en el caché de la app: el sistema puede haberla limpiado antes de sincronizar. */
+async function archivoLocalExiste(uri: string): Promise<boolean> {
+  try {
+    const res = await fetch(uri);
+    return res.ok || res.status === 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Envía pendientes locales a Pulse en orden: productos → clientes → unidades → ventas → cobros.
  * Requiere JWT (sesión Pulse). El API usa JSON snake_case y enums como string (`Efectivo`, `fiado`, …).
@@ -242,6 +297,10 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     ventas: 0,
     cobros: 0,
     cobrosOmitidosSinClienteRemoto: 0,
+    proveedores: 0,
+    comprasProveedor: 0,
+    pagosProveedor: 0,
+    movimientosProveedorOmitidosSinProveedorRemoto: 0,
     errores: [],
   };
 
@@ -351,6 +410,98 @@ export async function sincronizarPendientesConPulse(accessToken: string): Promis
     const batch = await postSync('POST cobros', '/cobros', accessToken, body, Crypto.randomUUID());
     await applyCobroResults(batch.results);
     summary.cobros = cobrosItems.length;
+  });
+
+  await pushEntidad('proveedores', summary, async () => {
+    const provs = await proveedoresRepo.getDirty();
+    if (provs.length === 0) return;
+    const body = {
+      items: provs.map((p) => ({
+        local_id: p.id,
+        nombre: p.nombre,
+        telefono: p.telefono,
+        notas: p.notas,
+        deuda_inicial: p.deudaInicial,
+        client_updated_at: sqliteDateToIso(p.updatedAt),
+        deleted: p.pendingDelete === 1,
+      })),
+    };
+    const batch = await postSync('POST proveedores', '/proveedores', accessToken, body, Crypto.randomUUID());
+    await applyProveedorResults(batch.results);
+    summary.proveedores = provs.length;
+  });
+
+  await pushEntidad('comprasProveedor', summary, async () => {
+    const comprasRaw = await comprasProveedorRepo.getDirty();
+    const items: { local_id: number; proveedor_id: string; monto: number; fecha: string; nota: string | null }[] = [];
+    for (const c of comprasRaw) {
+      const rid = await proveedoresRepo.getRemoteId(c.proveedorId);
+      if (!rid) {
+        summary.movimientosProveedorOmitidosSinProveedorRemoto += 1;
+        continue;
+      }
+      items.push({ local_id: c.id, proveedor_id: rid, monto: c.monto, fecha: sqliteDateToIso(c.fecha), nota: c.nota });
+    }
+    if (items.length === 0) return;
+    const batch = await postSync('POST compras-proveedor', '/compras-proveedor', accessToken, { items }, Crypto.randomUUID());
+    await applyCompraProveedorResults(batch.results);
+    summary.comprasProveedor = items.length;
+  });
+
+  await pushEntidad('pagosProveedor', summary, async () => {
+    const pagosRaw = await pagosProveedorRepo.getDirty();
+    const items: {
+      local_id: number;
+      proveedor_id: string;
+      monto: number;
+      metodo_pago: string;
+      fecha: string;
+      nota: string | null;
+      comprobante_file_id: string | null;
+    }[] = [];
+    for (const pago of pagosRaw) {
+      const rid = await proveedoresRepo.getRemoteId(pago.proveedorId);
+      if (!rid) {
+        summary.movimientosProveedorOmitidosSinProveedorRemoto += 1;
+        continue;
+      }
+
+      // La foto del comprobante se sube ANTES de enviar el pago: el servidor solo recibe su id.
+      let fileId = pago.comprobanteFileId;
+      if (!fileId && pago.comprobanteUri) {
+        if (await archivoLocalExiste(pago.comprobanteUri)) {
+          try {
+            const up = await uploadFile(accessToken, pago.comprobanteUri, mimeTypeFromUri(pago.comprobanteUri));
+            fileId = up.id;
+            await pagosProveedorRepo.setComprobanteSubido(pago.id, up.id, up.url);
+          } catch (e) {
+            if (isAuthError(e)) throw e;
+            // Sin red / servidor: este pago espera al próximo ciclo (los demás siguen). No se manda sin foto.
+            summary.errores.push({
+              entidad: 'pagosProveedor',
+              mensaje: `comprobante del pago #${pago.id}: ${e instanceof Error ? e.message : String(e)}`,
+            });
+            continue;
+          }
+        } else {
+          await pagosProveedorRepo.descartarComprobanteLocal(pago.id);
+        }
+      }
+
+      items.push({
+        local_id: pago.id,
+        proveedor_id: rid,
+        monto: pago.monto,
+        metodo_pago: pago.metodoPago,
+        fecha: sqliteDateToIso(pago.fecha),
+        nota: pago.nota,
+        comprobante_file_id: fileId ?? null,
+      });
+    }
+    if (items.length === 0) return;
+    const batch = await postSync('POST pagos-proveedor', '/pagos-proveedor', accessToken, { items }, Crypto.randomUUID());
+    await applyPagoProveedorResults(batch.results);
+    summary.pagosProveedor = items.length;
   });
 
   await setPulseAccountLinked();

@@ -6,6 +6,9 @@ import { clientesRepo } from '../database/repositories/clientesRepo';
 import { unidadesRepo } from '../database/repositories/unidadesRepo';
 import { ventasRepo } from '../database/repositories/ventasRepo';
 import { cobrosRepo } from '../database/repositories/cobrosRepo';
+import { proveedoresRepo } from '../database/repositories/proveedoresRepo';
+import { comprasProveedorRepo } from '../database/repositories/comprasProveedorRepo';
+import { pagosProveedorRepo } from '../database/repositories/pagosProveedorRepo';
 
 let inFlight = false;
 
@@ -17,6 +20,9 @@ export async function hasPendingChanges(): Promise<boolean> {
     unidadesRepo.getDirty(),
     ventasRepo.getDirty(),
     cobrosRepo.getDirty(),
+    proveedoresRepo.getDirty(),
+    comprasProveedorRepo.getDirty(),
+    pagosProveedorRepo.getDirty(),
   ]);
   return pendientes.some((lista) => lista.length > 0);
 }

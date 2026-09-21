@@ -3,6 +3,7 @@ import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import TabNavigator from './TabNavigator';
 import UnidadesMedidaScreen from '../screens/UnidadesMedidaScreen';
+import ProveedoresScreen from '../screens/ProveedoresScreen';
 import LoginScreen from '../screens/LoginScreen';
 import BiometricGateScreen from '../screens/BiometricGateScreen';
 import BiometricOptInScreen from '../screens/BiometricOptInScreen';
@@ -89,6 +90,7 @@ export default function RootNavigator() {
         <>
           <Stack.Screen name="Main" component={TabNavigator} />
           <Stack.Screen name="UnidadesMedida" component={UnidadesMedidaScreen} />
+          <Stack.Screen name="Proveedores" component={ProveedoresScreen} />
         </>
       )}
     </Stack.Navigator>

@@ -15,6 +15,13 @@
       "when": 1785083974007,
       "tag": "0001_salty_lilandra",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789968886741,
+      "tag": "0002_noisy_plazm",
+      "breakpoints": true
     }
   ]
 }

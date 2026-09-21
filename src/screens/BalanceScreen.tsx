@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import {
   View,
   Text,
@@ -13,17 +14,19 @@ import {
   Pressable,
   TextInput,
 } from 'react-native';
-import { Share2, TrendingUp, DollarSign, FileText, UserPlus, X } from 'lucide-react-native';
+import { Share2, TrendingUp, DollarSign, FileText, UserPlus, X, Truck, Paperclip, ChevronRight } from 'lucide-react-native';
 import { ventasRepo } from '../database/repositories/ventasRepo';
 import { clientesRepo } from '../database/repositories/clientesRepo';
 import { cobrosRepo } from '../database/repositories/cobrosRepo';
 import { productosRepo } from '../database/repositories/productosRepo';
+import { pagosProveedorRepo, type PagoProveedorConNombre } from '../database/repositories/pagosProveedorRepo';
 import { calcularGananciaEstimada } from '../domain/finanzas';
 import { useTheme } from '../context/ThemeContext';
 import type { ColorPalette } from '../theme';
 import ComprobanteModal from '../components/ComprobanteModal';
 import type { ComprobanteVenta } from '../database/repositories/ventasRepo';
 import { getFechaLocalYYYYMMDD } from '../utils/dateLocal';
+import type { RootStackParamList } from '../navigation/types';
 
 function formatHora(iso: string): string {
   return new Date(iso).toLocaleTimeString('es-EC', {
@@ -81,11 +84,15 @@ type ResumenBalance = {
   ventasDelDia: { id: number; fecha: string; total: number; metodo_pago: string }[];
   diasAnteriores: { fecha: string; totalVentas: number; cantidadVentas: number }[];
   clientesConDeuda: { id: number; nombre: string; deuda: number }[];
+  /** Lo pagado a proveedores en el día: se resta del total vendido para el neto. */
+  totalPagadoProveedores: number;
+  pagosProveedorDelDia: PagoProveedorConNombre[];
 };
 
 export default function BalanceScreen() {
   const { colors } = useTheme();
   const styles = useMemo(() => createStyles(colors), [colors]);
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [resumen, setResumen] = useState<ResumenBalance | null>(null);
   const [cargando, setCargando] = useState(true);
@@ -119,6 +126,9 @@ export default function BalanceScreen() {
   const ventasDelDia = resumen?.ventasDelDia ?? [];
   const diasAnteriores = resumen?.diasAnteriores ?? [];
   const clientesConDeuda = resumen?.clientesConDeuda ?? [];
+  const totalPagadoProveedores = resumen?.totalPagadoProveedores ?? 0;
+  const pagosProveedorDelDia = resumen?.pagosProveedorDelDia ?? [];
+  const netoDelDia = totalVentas - totalPagadoProveedores;
 
   const esHoy = fechaSeleccionada === null;
   const fechaParaCargar = fechaSeleccionada ?? getFechaLocalYYYYMMDD();
@@ -126,12 +136,14 @@ export default function BalanceScreen() {
   const cargar = useCallback(async () => {
     setCargando(true);
     try {
-      const [resumenVentas, ventas, dias, deudas, todosProductos] = await Promise.all([
+      const [resumenVentas, ventas, dias, deudas, todosProductos, resumenPagos, pagosDelDia] = await Promise.all([
         ventasRepo.getResumenPorFecha(fechaParaCargar),
         ventasRepo.getDelDiaConId(esHoy ? undefined : fechaParaCargar),
         ventasRepo.getDiasConVentas(30),
         clientesRepo.getConBalance(),
         productosRepo.getAll(),
+        pagosProveedorRepo.getResumenPorFecha(fechaParaCargar),
+        pagosProveedorRepo.getDelDia(fechaParaCargar),
       ]);
       const gananciaEstimada = calcularGananciaEstimada(
         resumenVentas.totalVentas,
@@ -151,6 +163,8 @@ export default function BalanceScreen() {
         ventasDelDia: ventas,
         diasAnteriores: dias,
         clientesConDeuda: deudas.map((d) => ({ id: d.id, nombre: d.nombre, deuda: d.balance })),
+        totalPagadoProveedores: resumenPagos.totalPagado,
+        pagosProveedorDelDia: pagosDelDia,
       });
     } catch (e) {
       console.warn('[BalanceScreen] cargar', e);
@@ -282,7 +296,11 @@ export default function BalanceScreen() {
           ? '¡Ventas en alza! 📈'
           : '¡Buen día! 👍'
         : 'Sin ventas hoy.';
-    return `Reporte Yapa de hoy: Total $${totalVentas.toFixed(2)}${detalle}.${cobradoFiado} ${frase}`;
+    const proveedoresTexto =
+      totalPagadoProveedores > 0
+        ? ` Pagos a proveedores: -$${totalPagadoProveedores.toFixed(2)}. Neto del día: $${netoDelDia.toFixed(2)}.`
+        : '';
+    return `Reporte Yapa de hoy: Total $${totalVentas.toFixed(2)}${detalle}.${cobradoFiado}${proveedoresTexto} ${frase}`;
   };
 
   const compartirCierre = async () => {
@@ -346,6 +364,20 @@ export default function BalanceScreen() {
             )}
           </View>
         )}
+        {totalPagadoProveedores > 0 && (
+          <View style={styles.netoWrap}>
+            <View style={styles.netoFila}>
+              <Text style={styles.netoLabel}>Pagos a proveedores</Text>
+              <Text style={styles.netoPagos}>−${totalPagadoProveedores.toFixed(2)}</Text>
+            </View>
+            <View style={styles.netoFila}>
+              <Text style={styles.netoLabelFuerte}>{esHoy ? 'Neto del día' : 'Neto'}</Text>
+              <Text style={[styles.netoValor, netoDelDia < 0 && styles.netoNegativo]}>
+                {netoDelDia < 0 ? '−' : ''}${Math.abs(netoDelDia).toFixed(2)}
+              </Text>
+            </View>
+          </View>
+        )}
       </View>
 
       <View style={styles.cardSecundario}>
@@ -398,6 +430,41 @@ export default function BalanceScreen() {
           <Text style={styles.btnCompartirTexto}>Compartir cierre</Text>
         </TouchableOpacity>
       )}
+
+      {pagosProveedorDelDia.length > 0 && (
+        <View style={styles.seccionComprobantes}>
+          <Text style={styles.seccionTitulo}>{esHoy ? 'Pagos a proveedores del día' : 'Pagos a proveedores'}</Text>
+          {pagosProveedorDelDia.map((g) => (
+            <View key={g.id} style={styles.filaComprobante}>
+              <Truck size={20} color={colors.naranja} />
+              <View style={styles.filaComprobanteInfo}>
+                <Text style={styles.filaComprobanteNum} numberOfLines={1}>
+                  {g.proveedor_nombre ?? 'Proveedor'}
+                </Text>
+                <Text style={styles.filaComprobanteHora}>
+                  {formatHora(g.fecha)} · {g.metodo_pago}
+                  {g.nota ? ` · ${g.nota}` : ''}
+                </Text>
+              </View>
+              {g.comprobante_uri || g.comprobante_url ? <Paperclip size={16} color={colors.verde} /> : null}
+              <Text style={styles.pagoMonto}>−${g.monto.toFixed(2)}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+
+      <TouchableOpacity
+        style={styles.btnProveedores}
+        onPress={() => navigation.navigate('Proveedores')}
+        activeOpacity={0.8}
+      >
+        <Truck size={22} color={colors.verde} />
+        <View style={styles.btnProveedoresInfo}>
+          <Text style={styles.btnProveedoresTitulo}>Proveedores</Text>
+          <Text style={styles.btnProveedoresSub}>Registra pagos y cuentas por pagar</Text>
+        </View>
+        <ChevronRight size={20} color={colors.textoSuave} />
+      </TouchableOpacity>
 
       {clientesConDeuda.length > 0 && (
         <View style={styles.seccionDeudas}>
@@ -707,6 +774,71 @@ function createStyles(colors: ColorPalette) {
     fontSize: 14,
     color: colors.naranja,
     fontWeight: '600',
+  },
+  netoWrap: {
+    alignSelf: 'stretch',
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.borde,
+    gap: 6,
+  },
+  netoFila: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  netoLabel: {
+    fontSize: 14,
+    color: colors.textoSuave,
+  },
+  netoPagos: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.naranja,
+  },
+  netoLabelFuerte: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: colors.texto,
+  },
+  netoValor: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: colors.verde,
+  },
+  netoNegativo: {
+    color: colors.naranja,
+  },
+  pagoMonto: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.naranja,
+  },
+  btnProveedores: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: colors.superficie,
+    borderRadius: 12,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: colors.borde,
+  },
+  btnProveedoresInfo: {
+    flex: 1,
+  },
+  btnProveedoresTitulo: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colors.texto,
+  },
+  btnProveedoresSub: {
+    fontSize: 13,
+    color: colors.textoSuave,
+    marginTop: 2,
   },
   cardSecundario: {
     flexDirection: 'row',

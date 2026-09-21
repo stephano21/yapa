@@ -12,6 +12,9 @@ const TABLAS_SINCRONIZABLES = new Set([
   'ventas',
   'venta_detalle',
   'cobros',
+  'proveedores',
+  'compras_proveedor',
+  'pagos_proveedor',
 ]);
 
 /** Agrupa ráfagas de eventos (p. ej. una venta escribe varias filas) en un solo ciclo. */

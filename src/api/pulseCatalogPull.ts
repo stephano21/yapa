@@ -4,8 +4,19 @@ import { PulseAuthError, pulseAuthorizedHeaders } from './pulseAuth';
 import { ensureFreshAccessToken } from './pulseSession';
 import { parseJsonBody } from './httpUtils';
 import { db } from '../database/drizzle/client';
-import { productos, clientes, ventas, ventaDetalle, cobros, unidadesMedida } from '../database/drizzle/schema';
+import {
+  productos,
+  clientes,
+  ventas,
+  ventaDetalle,
+  cobros,
+  unidadesMedida,
+  proveedores,
+  comprasProveedor,
+  pagosProveedor,
+} from '../database/drizzle/schema';
 import { syncStateRepo } from '../database/repositories/syncStateRepo';
+import { getFechaHoraLocalParaDb } from '../utils/dateLocal';
 
 export type PullSummary = {
   productos: number;
@@ -13,6 +24,9 @@ export type PullSummary = {
   unidades: number;
   ventas: number;
   cobros: number;
+  proveedores: number;
+  comprasProveedor: number;
+  pagosProveedor: number;
 };
 
 type PagedResponse<T> = { items: T[]; next_cursor: string | null };
@@ -72,6 +86,39 @@ type PulledCobro = {
   cliente_id: string;
   monto: number;
   fecha: string;
+  created_at: string;
+};
+
+type PulledProveedor = {
+  id: string;
+  local_id: number | null;
+  nombre: string;
+  telefono: string | null;
+  notas: string | null;
+  deuda_inicial: number;
+  updated_at: string;
+};
+
+type PulledCompraProveedor = {
+  id: string;
+  local_id: number | null;
+  proveedor_id: string;
+  monto: number;
+  fecha: string;
+  nota: string | null;
+  created_at: string;
+};
+
+type PulledPagoProveedor = {
+  id: string;
+  local_id: number | null;
+  proveedor_id: string;
+  monto: number;
+  metodo_pago: string;
+  fecha: string;
+  nota: string | null;
+  comprobante_file_id: string | null;
+  comprobante_url: string | null;
   created_at: string;
 };
 
@@ -181,6 +228,15 @@ async function findClienteLocalIdByRemote(remoteId: string): Promise<number | nu
     .select({ id: clientes.id })
     .from(clientes)
     .where(eq(clientes.remoteId, remoteId))
+    .then((r) => r[0] ?? null);
+  return row?.id ?? null;
+}
+
+async function findProveedorLocalIdByRemote(remoteId: string): Promise<number | null> {
+  const row = await db
+    .select({ id: proveedores.id })
+    .from(proveedores)
+    .where(eq(proveedores.remoteId, remoteId))
     .then((r) => r[0] ?? null);
   return row?.id ?? null;
 }
@@ -330,8 +386,88 @@ async function upsertCobro(item: PulledCobro): Promise<void> {
   });
 }
 
+async function upsertProveedor(item: PulledProveedor): Promise<void> {
+  const existing = await db.select().from(proveedores).where(eq(proveedores.remoteId, item.id)).then((r) => r[0] ?? null);
+  if (existing) {
+    if (existing.dirty === 1 || existing.pendingDelete === 1) return;
+    await db
+      .update(proveedores)
+      .set({
+        nombre: item.nombre,
+        telefono: item.telefono ?? null,
+        notas: item.notas ?? null,
+        deudaInicial: item.deuda_inicial,
+        updatedAt: item.updated_at,
+        dirty: 0,
+        pendingDelete: 0,
+      })
+      .where(eq(proveedores.id, existing.id));
+    return;
+  }
+  await db.insert(proveedores).values({
+    nombre: item.nombre,
+    telefono: item.telefono ?? null,
+    notas: item.notas ?? null,
+    deudaInicial: item.deuda_inicial,
+    remoteId: item.id,
+    updatedAt: item.updated_at,
+    dirty: 0,
+    pendingDelete: 0,
+  });
+}
+
+async function upsertCompraProveedor(item: PulledCompraProveedor): Promise<void> {
+  const existing = await db
+    .select()
+    .from(comprasProveedor)
+    .where(eq(comprasProveedor.remoteId, item.id))
+    .then((r) => r[0] ?? null);
+  if (existing) return;
+
+  const proveedorLocalId = await findProveedorLocalIdByRemote(item.proveedor_id);
+  if (proveedorLocalId == null) return; // el proveedor llega por su propio pull (que corre antes en el mismo ciclo)
+
+  await db.insert(comprasProveedor).values({
+    proveedorId: proveedorLocalId,
+    monto: item.monto,
+    // El servidor manda la fecha con offset/UTC; el corte por día es local, igual que las ventas creadas en el teléfono.
+    fecha: getFechaHoraLocalParaDb(new Date(item.fecha)),
+    nota: item.nota ?? null,
+    remoteId: item.id,
+    createdAt: item.created_at,
+    syncedAt: sql`(datetime('now'))` as unknown as string,
+    dirty: 0,
+  });
+}
+
+async function upsertPagoProveedor(item: PulledPagoProveedor): Promise<void> {
+  const existing = await db
+    .select()
+    .from(pagosProveedor)
+    .where(eq(pagosProveedor.remoteId, item.id))
+    .then((r) => r[0] ?? null);
+  if (existing) return; // un pago ya conocido (p. ej. creado en este teléfono) nunca se re-edita desde un pull
+
+  const proveedorLocalId = await findProveedorLocalIdByRemote(item.proveedor_id);
+  if (proveedorLocalId == null) return;
+
+  await db.insert(pagosProveedor).values({
+    proveedorId: proveedorLocalId,
+    monto: item.monto,
+    metodoPago: item.metodo_pago,
+    fecha: getFechaHoraLocalParaDb(new Date(item.fecha)),
+    nota: item.nota ?? null,
+    comprobanteFileId: item.comprobante_file_id ?? null,
+    comprobanteUrl: item.comprobante_url ?? null,
+    remoteId: item.id,
+    createdAt: item.created_at,
+    syncedAt: sql`(datetime('now'))` as unknown as string,
+    dirty: 0,
+  });
+}
+
 /**
- * Descarga de Pulse lo nuevo desde el último pull (productos → clientes → unidades → ventas → cobros)
+ * Descarga de Pulse lo nuevo desde el último pull (productos → clientes → unidades → ventas → cobros → proveedores → compras → pagos)
  * y lo fusiona en la base local. Regla de conflicto: si una fila local está `dirty`/`pending_delete`,
  * el pull la deja intacta (se resuelve sola en el próximo push).
  */
@@ -372,11 +508,37 @@ export async function pullCatalogoDeSpulse(accessToken: string): Promise<PullSum
     upsertCobro
   );
 
+  // Proveedores antes que sus compras/pagos: estos necesitan el proveedor local para enlazarse.
+  const proveedoresCount = await pullResource<PulledProveedor>(
+    'proveedores',
+    accessToken,
+    'updated_since',
+    (i) => i.updated_at,
+    upsertProveedor
+  );
+  const comprasProveedorCount = await pullResource<PulledCompraProveedor>(
+    'compras-proveedor',
+    accessToken,
+    'created_since',
+    (i) => i.created_at,
+    upsertCompraProveedor
+  );
+  const pagosProveedorCount = await pullResource<PulledPagoProveedor>(
+    'pagos-proveedor',
+    accessToken,
+    'created_since',
+    (i) => i.created_at,
+    upsertPagoProveedor
+  );
+
   return {
     productos: productosCount,
     clientes: clientesCount,
     unidades: unidadesCount,
     ventas: ventasCount,
     cobros: cobrosCount,
+    proveedores: proveedoresCount,
+    comprasProveedor: comprasProveedorCount,
+    pagosProveedor: pagosProveedorCount,
   };
 }

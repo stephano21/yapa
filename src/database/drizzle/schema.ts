@@ -72,6 +72,52 @@ export const unidadesMedida = sqliteTable('unidades_medida', {
   pendingDelete: integer('pending_delete').notNull().default(0),
 });
 
+export const proveedores = sqliteTable('proveedores', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  nombre: text('nombre').notNull(),
+  telefono: text('telefono'),
+  notas: text('notas'),
+  deudaInicial: real('deuda_inicial').notNull().default(0),
+  remoteId: text('remote_id'),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+  dirty: integer('dirty').notNull().default(1),
+  pendingDelete: integer('pending_delete').notNull().default(0),
+});
+
+/** Compra a crédito al proveedor: sube lo que se le debe, no mueve caja. */
+export const comprasProveedor = sqliteTable('compras_proveedor', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  proveedorId: integer('proveedor_id').notNull(),
+  monto: real('monto').notNull(),
+  fecha: text('fecha').notNull(),
+  nota: text('nota'),
+  remoteId: text('remote_id'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  syncedAt: text('synced_at'),
+  dirty: integer('dirty').notNull().default(1),
+});
+
+/**
+ * Pago a proveedor: sale plata, se resta del total vendido del día (neto).
+ * Comprobante (transferencias): `comprobanteUri` = foto local pendiente de subir;
+ * `comprobanteFileId` = id en Pulse una vez subida; `comprobanteUrl` = URL firmada (temporal) para verla.
+ */
+export const pagosProveedor = sqliteTable('pagos_proveedor', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  proveedorId: integer('proveedor_id').notNull(),
+  monto: real('monto').notNull(),
+  metodoPago: text('metodo_pago').notNull(),
+  fecha: text('fecha').notNull(),
+  nota: text('nota'),
+  comprobanteUri: text('comprobante_uri'),
+  comprobanteFileId: text('comprobante_file_id'),
+  comprobanteUrl: text('comprobante_url'),
+  remoteId: text('remote_id'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  syncedAt: text('synced_at'),
+  dirty: integer('dirty').notNull().default(1),
+});
+
 export const syncState = sqliteTable('sync_state', {
   resource: text('resource').primaryKey(),
   lastCursor: text('last_cursor'),

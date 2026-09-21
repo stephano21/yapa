@@ -25,6 +25,13 @@ function messageFromBody(body: unknown, fallback: string): string {
   return fallback;
 }
 
+export function mimeTypeFromUri(uri: string): string {
+  const ext = uri.split('?')[0].split('.').pop()?.toLowerCase();
+  if (ext === 'png') return 'image/png';
+  if (ext === 'webp') return 'image/webp';
+  return 'image/jpeg';
+}
+
 /**
  * Endpoint genérico de subida: sube el archivo y devuelve su Id — recién con ese Id se asocia a
  * lo que corresponda (setTenantLogo, setProfilePhoto, etc.), en un segundo paso separado.
